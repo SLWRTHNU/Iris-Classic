@@ -285,7 +285,7 @@ def load_logo_if_needed():
 
 # ---------- Display driver ----------
 try:
-    from Pico_LCD_1_8 import LCD_1inch8 as ST7735
+    from Pico_LCD_2_8 import LCD_2inch8 as ST7735
 except ImportError:
     print("FATAL: Display not found. Rebooting in 5 seconds...")
     utime.sleep(0)
@@ -1236,7 +1236,6 @@ def draw_screen(lcd, bg_data):
 # ---------- Main ----------
 
 def main():
-    print("Iris Classic: app_main v1.0.1 starting")
     """
     Safe entry point for app_main.
     Any fatal error will be shown on the LCD and then we reboot,
@@ -1427,8 +1426,3 @@ def _main_impl(lcd):
 # Keep this at the very end of app_main.py
 if __name__ == "__main__":
     main()
-
-
-
-
-
