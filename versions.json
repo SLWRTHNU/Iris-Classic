@@ -5,8 +5,6 @@
     { "path": "app_main.py" },
     { "path": "Pico_LCD_2_8.py" },
     { "path": "writer.py" },
-    { "path": "small_20.py" },
-    { "path": "large_65.py" },
     { "path": "arrows_30.py" }
   ]
 }
