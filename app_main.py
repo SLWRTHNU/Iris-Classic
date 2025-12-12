@@ -1236,6 +1236,7 @@ def draw_screen(lcd, bg_data):
 # ---------- Main ----------
 
 def main():
+    print("Iris Classic: app_main v1.0.1 starting")
     """
     Safe entry point for app_main.
     Any fatal error will be shown on the LCD and then we reboot,
