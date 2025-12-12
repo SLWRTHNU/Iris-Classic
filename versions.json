@@ -1,9 +1,8 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.0",
   "files": [
     { "path": "bootloader.py" },
     { "path": "app_main.py" },
-    { "path": "Pico_LCD_2_8.py", "target": "Pico_LCD_2_8.py" },
     { "path": "writer.py" },
     { "path": "small_20.py" },
     { "path": "large_65.py" },
