@@ -1,5 +1,5 @@
 {
-  "model": "mini",
+  "model": "classic",
   "version": "1.0.0",
   "files": [
     { "path": "app_main.py",    "target": "app_main.py" },
@@ -7,7 +7,7 @@
     { "path": "small_20.py",    "target": "small_20.py" },
     { "path": "large_65.py",    "target": "large_65.py" },
     { "path": "arrows_30.py",   "target": "arrows_30.py" },
-    { "path": "Pico_LCD_1_8.py","target": "Pico_LCD_1_8.py" },
+    { "path": "Pico_LCD_2_8.py","target": "Pico_LCD_2_8.py" },
     { "path": "logo.bin",       "target": "logo.bin" }
   ]
 }
