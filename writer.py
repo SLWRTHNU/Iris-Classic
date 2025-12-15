@@ -282,7 +282,3 @@ class CWriter(Writer):
             if bgcolor is not None:
                 self.bgcolor = bgcolor
         return self.fgcolor, self.bgcolor
-
-
-
-
