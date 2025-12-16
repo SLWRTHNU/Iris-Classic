@@ -77,6 +77,67 @@ except ImportError:
 BLACK = 0x0000
 WHITE = 0xFFFF
 
+def github_headers():
+    # Do NOT print the token.
+    # Supports fine-grained tokens.
+    return {
+        "Authorization": "Bearer " + GITHUB_TOKEN,
+        "User-Agent": "IrisClassic",
+    }
+
+def github_contents_url(path):
+    # path like "versions.json" or "app_main.py"
+    return "https://api.github.com/repos/{}/{}/contents/{}?ref={}".format(
+        GITHUB_OWNER, GITHUB_REPO, path, GITHUB_BRANCH
+    )
+
+def github_get_bytes(path):
+    url = github_contents_url(path)
+    h = github_headers()
+    # This makes GitHub return raw file bytes for the contents endpoint.
+    h["Accept"] = "application/vnd.github.raw"
+
+    r = None
+    try:
+        r = requests.get(url, headers=h)
+        status = getattr(r, "status_code", getattr(r, "status", 0))
+        if status != 200:
+            try:
+                print("GitHub GET bytes failed:", path, "status:", status, "body:", r.content[:120])
+            except Exception:
+                print("GitHub GET bytes failed:", path, "status:", status)
+            try:
+                r.close()
+            except Exception:
+                pass
+            return None, status
+
+        data = r.content
+        r.close()
+        return data, 200
+
+    except Exception as e:
+        print("GitHub GET bytes exception:", path, e)
+        try:
+            if r:
+                r.close()
+        except Exception:
+            pass
+        return None, 0
+
+def github_get_json(path):
+    b, status = github_get_bytes(path)
+    if status != 200 or not b:
+        return None, status
+
+    try:
+        if isinstance(b, bytes):
+            b = b.decode("utf-8", "ignore")
+        return json.loads(b), 200
+    except Exception as e:
+        print("GitHub JSON parse failed:", path, e)
+        return None, 0
+
 
 # ----# ---------- Boot logo helpers (low-RAM) ----------
 
@@ -375,12 +436,47 @@ def save_local_version(version_str):
         print("Failed to write local version file:", e)
 
 # ... (Place this block where fetch_versions_json is currently defined)
-def fetch_versions_json():
-    data, status = github_get_json(VERSIONS_PATH)
-    if status != 200 or data is None:
-        status_error(None, 4)  # (lcd not passed here; handled in main)
+def fetch_versions_json(lcd):
+    url = RAW_BASE_URL + VERSIONS_PATH
+    headers = get_github_headers()
+    r = None
+
+    print("Fetching versions.json:", url)
+
+    try:
+        r = requests.get(url, headers=headers)
+        status = getattr(r, "status_code", getattr(r, "status", 0))
+        print("versions.json HTTP status:", status)
+
+        if status != 200:
+            # Print a small snippet to help identify 401/403/404 pages
+            try:
+                snippet = r.content[:200]
+                print("versions.json body (first 200 bytes):", snippet)
+            except Exception:
+                pass
+            try:
+                r.close()
+            except Exception:
+                pass
+            return None
+
+        b = r.content
+        r.close()
+
+        if isinstance(b, bytes):
+            b = b.decode("utf-8", "ignore")
+
+        return json.loads(b)
+
+    except Exception as e:
+        print("versions.json fetch exception:", e)
+        try:
+            if r:
+                r.close()
+        except Exception:
+            pass
         return None
-    return data
 
 
 
@@ -627,8 +723,8 @@ def run_app_main():
 
 def main():
     lcd = init_lcd()
-    #draw_boot_logo(lcd)  # logo + initial status
-    status_connecting(lcd)
+    draw_boot_logo(lcd)  # logo + initial status
+    #status_connecting(lcd)
 
     ssid, pwd = load_config_wifi()
 
@@ -648,7 +744,8 @@ def main():
         run_app_main()
         return
 
-    vers_data = fetch_versions_json()
+    vers_data = fetch_versions_json(lcd)
+
     if vers_data is None:
         status_error(lcd, 21)  # versions fetch failed
         lcd = None
