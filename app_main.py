@@ -4,7 +4,7 @@ import network
 import ntptime
 import urequests as requests
 import gc
-
+from Pico_LCD_2_8 import PICO_RP2040, PICO_RP2350
 import machine
 
 # ---------- Config ----------
@@ -98,18 +98,18 @@ def mgdl_to_units(val_mgdl: float) -> float:
 def direction_to_arrow(direction: str) -> str:
     # These letters map to glyphs in your arrows_font font.
     return {
-        "Flat": " A ",
-        "SingleUp": " C ",
-        "DoubleUp": " CC ",
-        "TripleUp": " CCC ",
-        "SingleDown": " D ",
-        "DoubleDown": " DD ",
-        "TripleDown": " DDD ",
-        "FortyFiveUp": " G ",
-        "FortyFiveDown": " H ",
-        "NOT COMPUTABLE": " -- ",
-        "NONE": " -- ",
-    }.get(direction or "NONE", "?")
+        "Flat": "A",
+        "SingleUp": "C",
+        "DoubleUp": "CC",
+        "TripleUp": "CCC",
+        "SingleDown": "D",
+        "DoubleDown": "DD",
+        "TripleDown": "DDD",
+        "FortyFiveUp": "G",
+        "FortyFiveDown": "H",
+        "NOT COMPUTABLE": "--",
+        "NONE": "--",
+    }.get(direction or "NONE", "")
 
 
 def parse_entries(data):
@@ -146,15 +146,15 @@ def parse_entries(data):
 def fmt_bg(bg_val: float) -> str:
     if str(DISPLAY_UNITS).lower() == "mgdl":
         return str(int(round(bg_val)))
-    return " {:.1f}   ".format(bg_val)
+    return "{:.1f}".format(bg_val)
 
 
 def fmt_delta(delta_val) -> str:
     if delta_val is None:
         return ""
     if str(DISPLAY_UNITS).lower() == "mgdl":
-        return " {:+.0f}   ".format(delta_val)
-    return " {:+.1f}   ".format(delta_val)
+        return "{:+.0f}".format(delta_val)
+    return "{:+.1f}".format(delta_val)
 
 
 def draw_screen(lcd, w_small, w_big, w_arrow, state):
@@ -167,7 +167,7 @@ def draw_screen(lcd, w_small, w_big, w_arrow, state):
 
     W = lcd.width
     H = lcd.height
-    M = 10  # margin from edges
+    M = 8  # margin from edges
 
     # ---- Build strings ----
     raw_s = state["time_ms"] // 1000
@@ -221,6 +221,133 @@ def draw_screen(lcd, w_small, w_big, w_arrow, state):
 
     lcd.show()
 
+# ---------------- Touch RUN long-press factory reset ----------------
+
+# Fill these in using the numbers you recorded in Step 1
+RUN_X0 = 245
+RUN_Y0 = 190
+RUN_X1 = 319
+RUN_Y1 = 239
+
+RUN_HOLD_MS = 5000
+
+_run_hold_start_ms = None
+_run_last_shown = None
+
+def _touch_xy_on_screen(lcd):
+    raw = lcd.touch_get()
+    if not raw:
+        return None
+
+    if PICO_RP2040:
+        x = 320 - int((raw[1] - 430) * 320 / 3270)
+        y = int((raw[0] - 430) * 240 / 3270)
+    else:
+        x = 320 - int((raw[1] - 4500) * 320 / 3360)
+        y = int((raw[0] - 4480) * 240 / 3500)
+
+    if x < 0: x = 0
+    if x > 319: x = 319
+    if y < 0: y = 0
+    if y > 239: y = 239
+    return x, y
+
+def _in_run_button(x, y):
+    return (RUN_X0 <= x <= RUN_X1) and (RUN_Y0 <= y <= RUN_Y1)
+
+def _center_x(writer, text, screen_w):
+    return (screen_w - writer.stringlen(text)) // 2
+
+def _draw_reset_countdown(lcd, w_small, seconds_left):
+    # Black screen
+    lcd.fill(0x0000)
+
+    # Two centered lines:
+    # "Resetting in"
+    # "5" (or 4..0)
+    line1 = "Resetting in"
+    line2 = str(seconds_left)
+
+    # vertical centering for 2 lines
+    line_h = w_small.height
+    gap = 6
+    total_h = (line_h * 2) + gap
+    y0 = (lcd.height - total_h) // 2
+
+    w_small.setcolor(0xFFFF, 0x0000)  # white on black
+
+    x1 = _center_x(w_small, line1, lcd.width)
+    w_small.set_textpos(lcd, y0, x1)
+    w_small.printstring(line1)
+
+    x2 = _center_x(w_small, line2, lcd.width)
+    w_small.set_textpos(lcd, y0 + line_h + gap, x2)
+    w_small.printstring(line2)
+
+    lcd.show()
+
+def _do_factory_reset():
+    # Keep this list conservative so you do not brick the device.
+    # This forces setup again because config.py is gone.
+    files_to_delete = [
+        "config.py",
+    ]
+
+    for fn in files_to_delete:
+        try:
+            os.remove(fn)
+        except OSError:
+            pass
+
+def check_touch_factory_reset(lcd, w_small):
+    """
+    Call this often (every 20 to 100ms).
+    If the RUN touch area is held for 5 seconds:
+      - show countdown 5..0
+      - delete config.py
+      - reset the device
+    """
+    global _run_hold_start_ms, _run_last_shown
+
+    pt = _touch_xy_on_screen(lcd)
+    now = utime.ticks_ms()
+
+    if pt and _in_run_button(pt[0], pt[1]):
+        if _run_hold_start_ms is None:
+            _run_hold_start_ms = now
+            _run_last_shown = None
+
+        elapsed = utime.ticks_diff(now, _run_hold_start_ms)
+
+        # Countdown display (5..0)
+        remaining = 5 - (elapsed // 1000)
+        if remaining < 0:
+            remaining = 0
+
+        if remaining != _run_last_shown:
+            _draw_reset_countdown(lcd, w_small, remaining)
+            _run_last_shown = remaining
+
+        if elapsed >= RUN_HOLD_MS:
+            _draw_reset_countdown(lcd, w_small, 0)
+            utime.sleep_ms(250)
+            _do_factory_reset()
+            machine.reset()
+    else:
+        _run_hold_start_ms = None
+        _run_last_shown = None
+
+def sleep_ms_with_reset_check(lcd, w_small, total_ms):
+    """
+    Use this instead of utime.sleep_ms(total_ms) so the 5-second hold works
+    even while your code is "sleeping".
+    """
+    step = 50
+    t0 = utime.ticks_ms()
+    while utime.ticks_diff(utime.ticks_ms(), t0) < total_ms:
+        check_touch_factory_reset(lcd, w_small)
+        utime.sleep_ms(step)
+
 
 def main():
     gc.collect()
@@ -240,6 +367,7 @@ def main():
         lcd.text("WiFi failed", 10, 10, WHITE)
         lcd.show()
         utime.sleep(2)
+        
 
     ntp_sync()
 
