@@ -32,11 +32,13 @@ class Palette(framebuf.FrameBuffer):
 class LCD_2inch8(framebuf.FrameBuffer):
 
     def __init__(self):
-        self.RED   =   0x07E0
-        self.GREEN =   0x001f
-        self.BLUE  =   0xf800
-        self.WHITE =   0xffff
-        self.BLACK =   0x0000
+        self.RED   = 0xF800
+        self.GREEN = 0x07E0
+        self.BLUE  = 0x001F
+        self.WHITE = 0xFFFF
+        self.BLACK = 0x0000
+
+
         
         self.width = 320
         self.height = 240
@@ -58,6 +60,13 @@ class LCD_2inch8(framebuf.FrameBuffer):
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
         self.palette = Palette()
         self.init_display()
+        
+                # --- Iris: ensure backlight is ON at boot ---
+        try:
+            self.bl_ctrl(100)  # 0-100
+        except Exception:
+            pass
+
 
         
     def write_cmd(self, cmd):
@@ -90,6 +99,7 @@ class LCD_2inch8(framebuf.FrameBuffer):
         
         self.write_cmd(0x36)
         self.write_data(0xA0)
+
         
         self.write_cmd(0x3a)
         self.write_data(0x55)
@@ -151,26 +161,51 @@ class LCD_2inch8(framebuf.FrameBuffer):
         self.write_cmd(0x29)
 
     def show_up(self):
-
         self.write_cmd(0x2A)
         self.write_data(0x00)
         self.write_data(0x00)
         self.write_data(0x01)
-        self.write_data(0x3f)
-         
+        self.write_data(0x3F)
+
         self.write_cmd(0x2B)
         self.write_data(0x00)
         self.write_data(0x00)
         self.write_data(0x00)
-        self.write_data(0xef)
-                
+        self.write_data(0xEF)
+
         self.write_cmd(0x2C)
-        
+
         self.cs(1)
         self.dc(1)
         self.cs(0)
-        self.spi.write(self.buffer)
+
+        mv = memoryview(self.buffer)
+
+        # Small temp buffer so we do not allocate another full screen buffer
+        CHUNK = 4096
+        tmp = bytearray(CHUNK)
+
+        ln = len(mv)
+        off = 0
+        while off < ln:
+            n = CHUNK
+            if off + n > ln:
+                n = ln - off
+
+            src = mv[off:off + n]
+
+            # Swap each 2-byte pixel: [low, high] -> [high, low]
+            i = 0
+            while i + 1 < n:
+                tmp[i] = src[i + 1]
+                tmp[i + 1] = src[i]
+                i += 2
+
+            self.spi.write(tmp[:n])
+            off += n
+
         self.cs(1)
+
     
     def show(self):
         self.show_up()
