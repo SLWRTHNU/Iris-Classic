@@ -16,6 +16,19 @@ LCD_RST  = 15
 TP_CS    = 16
 TP_IRQ   = 17
 
+
+class Palette(framebuf.FrameBuffer):
+    # 2-entry palette for CWriter: index 0 = bg, index 1 = fg
+    def __init__(self):
+        buf = bytearray(4)  # 2 pixels * 2 bytes (RGB565)
+        super().__init__(buf, 2, 1, framebuf.RGB565)
+
+    def bg(self, color):
+        self.pixel(0, 0, color)
+
+    def fg(self, color):
+        self.pixel(1, 0, color)
+        
 class LCD_2inch8(framebuf.FrameBuffer):
 
     def __init__(self):
@@ -43,6 +56,7 @@ class LCD_2inch8(framebuf.FrameBuffer):
               
         self.buffer = bytearray(self.height * self.width * 2)
         super().__init__(self.buffer, self.width, self.height, framebuf.RGB565)
+        self.palette = Palette()
         self.init_display()
 
         
@@ -75,7 +89,7 @@ class LCD_2inch8(framebuf.FrameBuffer):
         time.sleep_ms(100)
         
         self.write_cmd(0x36)
-        self.write_data(0x60)
+        self.write_data(0xA0)
         
         self.write_cmd(0x3a)
         self.write_data(0x55)
@@ -157,6 +171,9 @@ class LCD_2inch8(framebuf.FrameBuffer):
         self.cs(0)
         self.spi.write(self.buffer)
         self.cs(1)
+    
+    def show(self):
+        self.show_up()
         
     def bl_ctrl(self,duty):
         pwm = PWM(Pin(LCD_BL))
@@ -253,6 +270,7 @@ if __name__=='__main__':
         LCD.show_up()  
         time.sleep(0.1)
                
+
 
 
 
