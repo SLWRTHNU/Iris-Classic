@@ -1,6 +1,6 @@
 {
   "model": "classic",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "files": [
     { "path": "app_main.py",    "target": "app_main.py" },
     { "path": "writer.py",      "target": "writer.py" },
