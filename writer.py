@@ -43,6 +43,8 @@ class Writer:
         if self.devid not in Writer.state:
             Writer.state[self.devid] = DisplayState()
         self.font = font
+        self.char_spacing = 0  # extra pixels between letters (0 = default)
+
         if font.height() >= device.height or font.max_width() >= device.width:
             raise ValueError("Font too large for screen")
         # Allow to work with reverse or normal font mapping
@@ -123,8 +125,12 @@ class Writer:
                 rstr = string[pos + 1 :]
                 string = lstr
 
-        for char in string:
+        for i, char in enumerate(string):
             self._printchar(char, invert)
+            if self.char_spacing and i != (len(string) - 1) and char != "\n":
+                self._getstate().text_col += self.char_spacing
+            
+            
         if rstr is not None:
             self._printchar("\n")
             self._printline(rstr, invert)  # Recurse
@@ -138,6 +144,9 @@ class Writer:
         for char in string[:-1]:
             _, _, char_width = self.font.get_ch(char)
             l += char_width
+            if self.char_spacing:
+                l += self.char_spacing
+
             if oh and l + sc > wd:
                 return True  # All done. Save time.
         char = string[-1]
@@ -219,6 +228,15 @@ class Writer:
         s.text_col += self.char_width
         self.cpos += 1
 
+    def set_spacing(self, pixels=0):
+    # pixels = extra blank columns between characters
+        try:
+            self.char_spacing = max(0, int(pixels))
+        except Exception:
+            self.char_spacing = 0
+
+    
+    
     def tabsize(self, value=None):
         if value is not None:
             self.tab = value
