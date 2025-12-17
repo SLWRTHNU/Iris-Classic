@@ -31,6 +31,9 @@ import small_font as font_small
 import large_font as font_big  # digits-only big font
 import arrows_font as font_arrows
 
+
+
+
 # ---------- Colors ----------
 BLACK = 0x0000
 WHITE = 0xFFFF
@@ -173,8 +176,11 @@ def draw_screen(lcd, w_small, w_big, w_arrow, state):
     raw_s = state["time_ms"] // 1000
     mins = int((utime.time() - raw_s) // 60)
     if mins < 0:
-        mins = 0
-    age_text = "{} mins ago".format(mins)
+       mins = 0
+
+    unit = "min" if mins == 1 else "mins"
+    age_text = "{} {} ago".format(mins, unit)
+
 
     bg_text = fmt_bg(state["bg"])
     arrow_text = state["arrow"]
@@ -211,6 +217,7 @@ def draw_screen(lcd, w_small, w_big, w_arrow, state):
     w_arrow.setcolor(WHITE, BLACK)
     w_arrow.set_textpos(lcd, y_arrow, M)
     w_arrow.printstring(arrow_text)
+
 
     # ---- Draw delta (bottom-right) ----
     if delta_text:
@@ -349,7 +356,13 @@ def sleep_ms_with_reset_check(lcd, w_small, total_ms):
         utime.sleep_ms(step)
 
 
-def main():
+def main(lcd=None):
+    if lcd is None:
+        from Pico_LCD_2_8 import LCD_2inch8
+        lcd = LCD_2inch8()
+
+    # continue with your normal app code using lcd...
+
     gc.collect()
 
     lcd = LCD()
@@ -357,8 +370,10 @@ def main():
         lcd.show = lcd.show_up
 
     w_small = CWriter(lcd, font_small, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+    w_small.set_spacing(6)    
     w_big = CWriter(lcd, font_big, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
     w_arrow = CWriter(lcd, font_arrows, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+    w_arrow.set_spacing(10)
 
     # Connect Wi-Fi once
     if not connect_wifi(WIFI_SSID, WIFI_PASSWORD):
