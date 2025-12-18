@@ -44,6 +44,14 @@ WHITE = 0xFFFF
 hb_state = True
 
 # ---------- Helpers ----------
+def get_device_id():
+    """Reads the persistent ID created by the bootloader."""
+    try:
+        with open("device_id.txt", "r") as f:
+            return f.read().strip()
+    except Exception:
+        return "N/A"
+
 def connect_wifi(ssid, pwd, timeout_sec=12):
     sta = network.WLAN(network.STA_IF)
     sta.active(True)
@@ -147,12 +155,33 @@ def fmt_delta(delta_val) -> str:
         return "{:+.0f}".format(delta_val)
     return "{:+.1f}".format(delta_val)
 
-def draw_screen(lcd, w_small, w_big, w_arrow, w_heart, last, hb_state):
-    lcd.fill(BLACK)
+def draw_screen(lcd, w_small, w_big, w_arrow, w_heart, last, hb_state): 
+    
     if not last:
-        lcd.text("LOADING...", 10, 10, WHITE)
+        # Layout constants matching bootloader
+        TEXT_HEIGHT = 8
+        BAR_HEIGHT = TEXT_HEIGHT + 1
+        Y_POS = 240 - BAR_HEIGHT + 1
+        STATUS_X = 5
+        
+        device_id = get_device_id()
+        id_text = "ID:{}".format(device_id)
+
+        # Draw the white background bar at the bottom
+        lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
+        
+        # Draw "LOADING DATA..." on the left
+        lcd.text("Loading", STATUS_X, Y_POS, BLACK)
+        
+        # Draw the Device ID on the right
+        id_x = lcd.width - (len(id_text) * 8) - 5
+        lcd.text(id_text, id_x, Y_POS, BLACK)
+        
         lcd.show()
-        return
+        return        
+
+    # Once data is available, then we clear the screen for the main UI
+    lcd.fill(BLACK)
 
     W, H, M = lcd.width, lcd.height, 8
     raw_s = last["time_ms"] // 1000
@@ -220,8 +249,8 @@ def main(lcd=None):
     w_arrow = CWriter(lcd, font_arrows, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
     w_heart = CWriter(lcd, font_heart, fgcolor=0xF800, bgcolor=BLACK, verbose=False)
     w_arrow.set_spacing(10)
-
-
+    
+    draw_screen(lcd, w_small, w_big, w_arrow, w_heart, None, hb_state)
 
     connect_wifi(WIFI_SSID, WIFI_PASSWORD)
     ntp_sync()
@@ -257,7 +286,7 @@ def main(lcd=None):
                 last_time_ms = parsed["time_ms"]
             fetch_next = utime.ticks_add(now, FETCH_MS)
 
-        utime.sleep_ms(20)
+        utime.sleep_ms(0)
 
 if __name__ == "__main__":
     main()
