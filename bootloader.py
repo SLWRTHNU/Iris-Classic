@@ -703,10 +703,10 @@ def main():
     except Exception:
         pass
 
-    lcd = None
+    #lcd = None
     gc.collect()
 
-    run_app_main()
+    run_app_main(lcd)
     return
 
 
