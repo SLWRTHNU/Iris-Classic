@@ -37,8 +37,10 @@ import arrows_font as font_arrows
 import heart as font_heart
 
 # ---------- Colors ----------
-BLACK = 0x0000
-WHITE = 0xFFFF
+BLACK  = 0x0000
+WHITE  = 0xFFFF
+RED    = 0xF800
+YELLOW = 0xFFE0
 
 # --- Global Heart State ---
 hb_state = True
@@ -186,49 +188,68 @@ def draw_screen(lcd, w_small, w_big, w_arrow, w_heart, last, hb_state):
     W, H, M = lcd.width, lcd.height, 8
     raw_s = last["time_ms"] // 1000
     mins = max(0, int((utime.time() - raw_s) // 60))
+    
+    bg_val = last["bg"]            # <--- This creates the name 'bg_val'
+    direction = last["direction"]  # <--- This creates the name 'direction'
+    
+    bg_text = fmt_bg(bg_val)
+    arrow_text = last["arrow"]
+    delta_text = fmt_delta(last["delta"])
     age_text = "{} {} ago".format(mins, "min" if mins == 1 else "mins")
     
     bg_text = fmt_bg(last["bg"])
     arrow_text = last["arrow"]
     delta_text = fmt_delta(last["delta"])
+    age_color = RED if mins >= STALE_MIN else WHITE
+    bg_color = WHITE
+    if bg_val <= LOW_THRESHOLD:
+        bg_color = RED
+    elif bg_val >= HIGH_THRESHOLD:
+        bg_color = YELLOW
+    arrow_color = WHITE
+    if ALERT_DOUBLE_UP and direction == "DoubleUp":
+        arrow_color = YELLOW
+    elif ALERT_DOUBLE_DOWN and direction == "DoubleDown":
+        arrow_color = RED
+    
 
     small_h, big_h, arrow_h, heart_h = font_small.height(), font_big.height(), font_arrows.height(), font_heart.height()
     bottom_h = max(small_h, arrow_h)
 
+    # Calculate Y positions
     y_age = M
     y_bg = max(0, (H - big_h) // 2)
     y_bottom_base = max(0, H - bottom_h - M)
     y_arrow = y_bottom_base + (bottom_h - arrow_h) // 2
     y_delta = y_bottom_base + (bottom_h - small_h) // 2
 
-    # Draw Age
-    w_small.setcolor(WHITE, BLACK)
+    # Draw Age (Top)
+    w_small.setcolor(age_color, BLACK)
     age_w = w_small.stringlen(age_text)
     x_age = (W - age_w) // 2
     w_small.set_textpos(lcd, y_age, x_age)
     w_small.printstring(age_text)
 
-    # Draw Heart
-    heart_char = "T"
-    heart_w = w_heart.stringlen(heart_char)
-    heart_x = x_age + age_w + 10
-    heart_y = y_age + (small_h - heart_h) // 2
+    # Draw Heart (Blinking)
     if hb_state:
-        w_heart.setcolor(0xF800, BLACK)
-        w_heart.set_textpos(lcd, heart_y, heart_x)
-        w_heart.printstring(heart_char)
+        w_heart.setcolor(RED, BLACK)
+        w_heart.set_textpos(lcd, y_age + (small_h - heart_h) // 2, x_age + age_w + 10)
+        w_heart.printstring("T")
 
-    # Draw BG
-    w_big.setcolor(WHITE, BLACK)
+    # Draw BG (Middle)
+    w_big.setcolor(bg_color, BLACK)
     x_bg = (W - w_big.stringlen(bg_text)) // 2
     w_big.set_textpos(lcd, y_bg, x_bg)
     w_big.printstring(bg_text)
 
-    # Draw Trend and Delta
-    w_arrow.setcolor(WHITE, BLACK)
+    # Draw Trend Arrow (Bottom Left)
+    w_arrow.setcolor(arrow_color, BLACK)
     w_arrow.set_textpos(lcd, y_arrow, M)
     w_arrow.printstring(arrow_text)
+
+    # Draw Delta (Bottom Right)
     if delta_text:
+        w_small.setcolor(WHITE, BLACK) # Delta usually stays white unless you want it to match BG
         x_delta = W - M - w_small.stringlen(delta_text)
         w_small.set_textpos(lcd, y_delta, x_delta)
         w_small.printstring(delta_text)
