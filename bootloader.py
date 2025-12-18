@@ -16,6 +16,24 @@ import json
 import os
 import gc
 
+
+def fade_backlight(lcd, start, end, step=5, delay_ms=15):
+    if lcd is None:
+        return
+    if start < end:
+        rng = range(start, end + 1, step)
+    else:
+        rng = range(start, end - 1, -step)
+
+    for d in rng:
+        try:
+            lcd.bl_ctrl(d)
+        except Exception:
+            pass
+        time.sleep_ms(delay_ms)
+
+
+
 GITHUB_USER   = "SLWRTHNU"
 GITHUB_REPO   = "Iris-Classic"
 GITHUB_BRANCH = "main"
@@ -65,8 +83,7 @@ def load_github_token():
         return ""
 
 
-
-
+# ---------- Display driver ----------
 try:
     from Pico_LCD_2_8 import LCD_2inch8 as ST7735
     LCD_AVAILABLE = True
@@ -74,179 +91,104 @@ except ImportError:
     LCD_AVAILABLE = False
     ST7735 = None
 
+import os
+
 BLACK = 0x0000
 WHITE = 0xFFFF
 
-def github_headers():
-    # Do NOT print the token.
-    # Supports fine-grained tokens.
-    return {
-        "Authorization": "Bearer " + GITHUB_TOKEN,
-        "User-Agent": "IrisClassic",
-    }
-
-def github_contents_url(path):
-    # path like "versions.json" or "app_main.py"
-    return "https://api.github.com/repos/{}/{}/contents/{}?ref={}".format(
-        GITHUB_OWNER, GITHUB_REPO, path, GITHUB_BRANCH
-    )
-
-def github_get_bytes(path):
-    url = github_contents_url(path)
-    h = github_headers()
-    # This makes GitHub return raw file bytes for the contents endpoint.
-    h["Accept"] = "application/vnd.github.raw"
-
-    r = None
-    try:
-        r = requests.get(url, headers=h)
-        status = getattr(r, "status_code", getattr(r, "status", 0))
-        if status != 200:
-            try:
-                print("GitHub GET bytes failed:", path, "status:", status, "body:", r.content[:120])
-            except Exception:
-                print("GitHub GET bytes failed:", path, "status:", status)
-            try:
-                r.close()
-            except Exception:
-                pass
-            return None, status
-
-        data = r.content
-        r.close()
-        return data, 200
-
-    except Exception as e:
-        print("GitHub GET bytes exception:", path, e)
-        try:
-            if r:
-                r.close()
-        except Exception:
-            pass
-        return None, 0
-
-def github_get_json(path):
-    b, status = github_get_bytes(path)
-    if status != 200 or not b:
-        return None, status
-
-    try:
-        if isinstance(b, bytes):
-            b = b.decode("utf-8", "ignore")
-        return json.loads(b), 200
-    except Exception as e:
-        print("GitHub JSON parse failed:", path, e)
-        return None, 0
-
-
-# ----# ---------- Boot logo helpers (low-RAM) ----------
-
-import os
-
+# ---------- Boot logo helpers (low-RAM) ----------
 LOGO_FILE = "logo.bin"
 LOGO_W = 320
 LOGO_H = 240
 
-def draw_boot_logo(lcd):
-    """
-    Draw logo.bin WITHOUT allocating a second full-screen buffer.
-    Loads logo.bin directly into lcd.buffer, then lcd.show().
-    """
-    if lcd is None:
-        return
-
-    expected = LOGO_W * LOGO_H * 2
-
-    try:
-        # 1) Verify file size quickly (no big read)
-        st = os.stat(LOGO_FILE)
-        size = st[6]  # file size in bytes
-        if size != expected:
-            print("Boot logo: size mismatch, got", size, "expected", expected)
-            lcd.fill(BLACK)
-            lcd.show()
-        else:
-            # 2) Fill the LCD's existing buffer from the file (chunked)
-            mv = memoryview(lcd.buffer)
-            with open(LOGO_FILE, "rb") as f:
-                off = 0
-                while off < expected:
-                    # 4096 is a safe chunk size
-                    n = f.readinto(mv[off:off + 4096])
-                    if not n:
-                        break
-                    off += n
-
-            lcd.show()
-            print("Boot logo drawn (no extra full buffer).")
-
-    except OSError as e:
-        print("Boot logo: failed to open", LOGO_FILE, ":", e)
-        try:
-            lcd.fill(BLACK)
-            lcd.show()
-        except Exception:
-            pass
-
-    # Draw the initial status/ID after the logo
-    try:
-        draw_bottom_status(lcd, "Connecting")
-    except Exception:
-        pass
-
-
-# Cons# Constants for bottom bar text (assuming 8x8 font, 320x240 screen)
+# Bottom bar text layout (built-in 8x8 text)
 TEXT_HEIGHT = 8
-BAR_HEIGHT = TEXT_HEIGHT + 1 # 10 pixels high for the bar
-Y_POS = 240 - BAR_HEIGHT + 1 # Text Y coordinate (240 - 10 + 1 = 119)
-STATUS_X = 5 # X coordinate for the status message (left alignment)
-
-def draw_bottom_status(lcd, status_msg):
-    """Draws status message (bottom left) and device ID (bottom right)."""
-    if lcd is None: return
-
-    device_id = ""
-    try:
-        with open(DEVICE_ID_FILE, "r") as f:
-            device_id = f.read().strip()
-    except Exception:
-        pass 
-    id_text = f"ID:{device_id}"
-    lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
-    lcd.text(status_msg, STATUS_X, Y_POS, BLACK) 
-    ID_TEXT_X = lcd.width - (len(id_text) * 8) - 5 
-    lcd.text(id_text, ID_TEXT_X, Y_POS, BLACK) 
-    lcd.show()
-    
-# ---------- Status policy ----------
-CONNECT_MSG = "Connecting"
-
-def status_connecting(lcd):
-    # Always the same clean message for non-errors
-    try:
-        draw_bottom_status(lcd, CONNECT_MSG)
-    except Exception:
-        pass
-
-def status_error(lcd, code):
-    # Unique numeric error codes
-    try:
-        draw_bottom_status(lcd, "Error: {:03d}".format(code))
-    except Exception:
-        pass
-    
+BAR_HEIGHT = TEXT_HEIGHT + 1
+Y_POS = 240 - BAR_HEIGHT + 1
+STATUS_X = 5
 
 def init_lcd():
     if not LCD_AVAILABLE:
         return None
     try:
         lcd = ST7735()
+
+        # IMPORTANT: Pico_LCD_2_8 uses show_up(); your bootloader uses show().
+        # Add a compatibility shim so lcd.show() works everywhere.
+        if not hasattr(lcd, "show") and hasattr(lcd, "show_up"):
+            lcd.show = lcd.show_up
+
         lcd.fill(BLACK)
         lcd.show()
         return lcd
     except Exception as e:
         print("LCD init failed:", e)
         return None
+
+def draw_bottom_status(lcd, status_msg):
+    """Status bottom-left, device ID bottom-right (white bar like before)."""
+    if lcd is None:
+        return
+
+    device_id = ""
+    try:
+        with open(DEVICE_ID_FILE, "r") as f:
+            device_id = f.read().strip()
+    except Exception:
+        pass
+
+    id_text = "ID:{}".format(device_id)
+
+    lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
+    lcd.text(status_msg, STATUS_X, Y_POS, BLACK)
+    id_x = lcd.width - (len(id_text) * 8) - 5
+    lcd.text(id_text, id_x, Y_POS, BLACK)
+    lcd.show()
+
+
+def draw_boot_logo(lcd):
+    if lcd is None:
+        return
+
+    expected = LOGO_W * LOGO_H * 2
+
+    try:
+        # Basic sanity checks
+        try:
+            buf_len = len(lcd.buffer)
+        except Exception:
+            buf_len = -1
+        print("logo expected:", expected, "lcd.buffer:", buf_len)
+
+        st = os.stat(LOGO_FILE)
+        size = st[6]
+        print("logo.bin size:", size)
+
+        if size != expected or buf_len != expected:
+            print("Boot logo: size mismatch; showing black screen")
+            lcd.fill(BLACK)
+            lcd.show()
+        else:
+            with open(LOGO_FILE, "rb") as f:
+                n = f.readinto(lcd.buffer)   # IMPORTANT: read directly into lcd.buffer
+            print("logo bytes readinto:", n)
+
+            lcd.show()
+            print("Boot logo drawn.")
+    except Exception as e:
+        print("Boot logo error:", repr(e))
+        try:
+            lcd.fill(BLACK)
+            lcd.show()
+        except Exception:
+            pass
+
+    # Put the status bar back (keeps your existing behavior)
+    try:
+        draw_bottom_status(lcd, "Connecting")
+    except Exception:
+        pass
+
 
 
 def lcd_msg(lcd, lines):
@@ -379,6 +321,12 @@ def github_get_json(path):
         return None, status
 
 
+def status_connecting(lcd):
+    # Keep the logo on screen and just update the bottom-left status text
+    try:
+        draw_bottom_status(lcd, "Connecting")
+    except Exception:
+        pass
 
 
 # ---------------- Wi-Fi ----------------
@@ -701,30 +649,18 @@ def check_remote_commands():
 
 # ---------------- main/runner ----------------
 
-def run_app_main():
-    """
-    Import and execute app_main.main().
-    """
-    try:
-        import app_main as app
-    except ImportError as e:
-        print("ERROR: app_main.py not found or bad:", e)
-        return
-
-    if hasattr(app, "main"):
-        try:
-            app.main()
-        except Exception as e:
-            print("Error running app.main():", e)
-    else:
-        print("app_main.py has no main() function; nothing to call.")
+def run_app_main(lcd=None):
+    gc.collect()
+    import app_main
+    app_main.main(lcd)
 
 
 
 def main():
     lcd = init_lcd()
-    draw_boot_logo(lcd)  # logo + initial status
-    #status_connecting(lcd)
+
+    # Show logo.bin + bottom status bar ("Connecting" + device ID)
+    draw_boot_logo(lcd)
 
     ssid, pwd = load_config_wifi()
 
@@ -735,9 +671,7 @@ def main():
         run_app_main()
         return
 
-
     if not connect_wifi(lcd, ssid, pwd):
-        # connect_wifi already set an error code
         status_error(lcd, 20)
         lcd = None
         gc.collect()
@@ -745,9 +679,8 @@ def main():
         return
 
     vers_data = fetch_versions_json(lcd)
-
     if vers_data is None:
-        status_error(lcd, 21)  # versions fetch failed
+        status_error(lcd, 21)
         lcd = None
         gc.collect()
         run_app_main()
@@ -755,20 +688,30 @@ def main():
 
     ok = perform_update(vers_data, lcd)
     if not ok:
-        status_error(lcd, 22)  # update failed
-        lcd = None
-        gc.collect()
-        run_app_main()
-        return
+        status_error(lcd, 22)  # update failed (we will still try app_main)
+
+    # ---- IMPORTANT: free RAM before starting app_main ----
+    vers_data = None
+    ssid = None
+    pwd = None
+
+    try:
+        sta = network.WLAN(network.STA_IF)
+        ap  = network.WLAN(network.AP_IF)
+        sta.active(False)
+        ap.active(False)
+    except Exception:
+        pass
+
+    lcd = None
+    gc.collect()
 
     run_app_main()
-    
+    return
+
+
+
+
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
