@@ -178,6 +178,18 @@ def fmt_bg(bg_val: float) -> str:
         return str(int(round(bg_val)))
     return "{:.1f}".format(bg_val)
 
+def draw_logo_simple(lcd):
+    """Re-draws the logo.bin directly to the LCD buffer"""
+    expected = 153600 # 320x240 * 2 bytes
+    try:
+        with open("logo.bin", "rb") as f:
+            chunk_size = 4096
+            # Read in chunks to prevent memory errors
+            for i in range(0, expected, chunk_size):
+                lcd.buffer[i:i+chunk_size] = f.read(chunk_size)
+    except Exception:
+        lcd.fill(BLACK) # Fallback if file is missing
+        
 def fmt_delta(delta_val) -> str:
     if delta_val is None: return ""
     if str(DISPLAY_UNITS).lower() == "mgdl":
@@ -217,18 +229,29 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
 
     # --- LOADING STATE ---
     if not last:
-        BAR_HEIGHT = 20 # Taller for Classic
-        Y_POS = H - BAR_HEIGHT - 10 # Bottom-aligned
-        STATUS_X = 10
-        lcd.fill(BLACK) # Clear screen for loading
+        # 1. Dimensions (Classic Style)
+        BAR_HEIGHT = 12
+        Y_BAR = 229
+        STATUS_X = 3
+        TEXT_Y_OFFSET = 0
+
+        # 2. Draw the Logo FIRST
+        draw_logo_simple(lcd)
+        
+        # 3. Draw the White Background Bar over the logo
+        lcd.fill_rect(0, Y_BAR, W, BAR_HEIGHT, WHITE)
+        
+        # 4. Left Text (Status)
+        lcd.text("Loading", STATUS_X, Y_BAR + TEXT_Y_OFFSET, BLACK)
+        
+        # 5. Right Text (ID)
         device_id = get_device_id()
         id_text = "ID:{}".format(device_id)
-        lcd.fill_rect(0, Y_POS, W, BAR_HEIGHT, WHITE)
-        lcd.text("Loading Data...", STATUS_X, Y_POS + 6, BLACK)
-        id_x = W - (len(id_text) * 8) - 10
-        lcd.text(id_text, id_x, Y_POS + 6, BLACK)
+        id_x = W - (len(id_text) * 8) - 3 
+        lcd.text(id_text, id_x, Y_BAR + TEXT_Y_OFFSET, BLACK)
+        
         lcd.show()
-        return   
+        return
 
     # --- FULL DATA STATE DRAW ---
     lcd.fill(BLACK)
