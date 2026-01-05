@@ -1,0 +1,2 @@
+import bootloader
+bootloader.main()
