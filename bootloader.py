@@ -275,13 +275,13 @@ def perform_update(vers_data, lcd, force=False):
     for idx, (p, t) in enumerate(work, start=1):
         pct = int((idx * 100) / len(work))
         log("Downloading: {} ({}%)".format(t, pct))
-        if lcd: draw_bottom_status(lcd, "Updating {}%".format(pct), show_id=False)
+        if lcd: draw_bottom_status(lcd, "Updating {}%".format(pct), show_id=True)
         if not gh_download_to_file(p, t + ".new"): return False
         gc.collect()
 
     # 2. COMMIT
     log("Swapping files...")
-    if lcd: draw_bottom_status(lcd, "Saving", show_id=False)
+    if lcd: draw_bottom_status(lcd, "Saving", show_id=True)
     for p, t in work: 
         _safe_swap(t)
 
@@ -295,7 +295,7 @@ def perform_update(vers_data, lcd, force=False):
     # 3. THE HARD RESET (The most important part)
     log("REBOOTING NOW")
     if lcd:
-        draw_bottom_status(lcd, "Rebooting", show_id=False)
+        draw_bottom_status(lcd, "Rebooting", show_id=True)
     
     time.sleep(2) # IMPORTANT: Let the file system finish writing
     
@@ -306,7 +306,7 @@ def perform_update(vers_data, lcd, force=False):
 def run_app_main(lcd=None):
     gc.collect()
     log("Handoff -> app_main")
-    try: draw_bottom_status(lcd, "Connected ", show_id=True)
+    try: draw_bottom_status(lcd, "Connected", show_id=True)
     except: pass
     try:
         import app_main
