@@ -8,6 +8,8 @@ import ubinascii
 import machine
 import sys
 import utime
+from writer import CWriter
+
 
 # 0. SPEED BOOST: Overclock to 240MHz 
 #machine.freq(240000000)
@@ -61,12 +63,14 @@ except ImportError:
 
 BLACK = 0x0000
 WHITE = 0xFFFF
+YELLOW = 0xFFE0
+RED = 0xF800
 LOGO_FILE   = "logo.bin"
 LOGO_W = 320
 LOGO_H = 240
-TEXT_HEIGHT = 10
-BAR_HEIGHT  = TEXT_HEIGHT + 1
-Y_POS       = 240 - BAR_HEIGHT + 1
+TEXT_HEIGHT = 11
+BAR_HEIGHT  = 12
+Y_POS       = 229
 STATUS_X    = 3
 
 # ---------- LCD Logic (ORDERED CORRECTLY) ----------
@@ -381,27 +385,9 @@ def draw_boot_logo(lcd):
 # ---------- Runner ----------
 def main():
     # 1. Hardware Stability Delay
-    time.sleep_ms(500) 
+    utime.sleep_ms(500) 
     
-    # 2. Start the LCD and show the logo immediately
-    lcd = init_lcd()
-    if lcd:
-        draw_boot_logo(lcd)
-    
-    # 3. Handle Bootloader Updates FIRST
-    # If this finds a new file, it will reboot the Pico immediately
-    apply_staged_bootloader_if_present()
-    
-    # 4. Heartbeat LED
-    try:
-        led = machine.Pin("LED", machine.Pin.OUT)
-        led.on()
-    except:
-        pass
-
-    log("BOOTLOADER: Starting...")
-    
-    # 5. Check for WiFi config
+    # 2. IMMEDIATE CONFIG CHECK
     config_exists = False
     try:
         os.stat("config.py")
@@ -409,73 +395,95 @@ def main():
     except OSError:
         config_exists = False
 
-    # 6. Setup Mode (If no config)
+    # 3. Handle Setup Mode FIRST (No Logo)
     if not config_exists:
-        log("Entering Setup Mode...")
+        lcd = init_lcd() # Start LCD but don't draw logo
+        if not lcd: return
+
+        from writer import CWriter
+        import config_font
+        
+        log("Entering Setup Mode (Skipping Logo)...")
         ap = network.WLAN(network.AP_IF)
         ap.active(True)
         ap.config(essid="Iris Classic", security=0)
         ip = "192.168.4.1"
         
-        if lcd:
-            YELLOW = 0xFFE0 # Pure Yellow for 2.8"
-            M, LH, IND = 20, 24, 15 # Increased spacing for larger screen
-            w = 320
-            
-            def _text_w_px(s): return len(s) * 8
-            def text_center(s, y, color, w=320):
-                x = max(0, (w - _text_w_px(s)) // 2)
-                lcd.text(s, x, y, color)
+        # Initialize Setup UI
+        w_setup = CWriter(lcd, config_font, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+        w_setup.set_spacing(2) 
+        lcd.fill(BLACK)
 
-            lcd.fill(BLACK)
-            text_center("IRIS CLASSIC SETUP", M, YELLOW, w=w)
-            text_center("Follow these steps:", M + LH, WHITE, w=w)
-            y = M + (LH * 3)
-            lcd.text("1) Connect to WiFi:", M, y, WHITE); y += LH
-            lcd.text("   Iris Classic", M + IND, y, YELLOW); y += (LH + 20)
-            lcd.text("2) Open this URL in browser:", M, y, WHITE); y += LH
-            lcd.text("   http://{}".format(ip), M + IND, y, YELLOW)
-            lcd.show()
+        def print_safe(text, y, x_val, color):
+            tw = w_setup.stringlen(text)
+            final_x = max(0, (320 - tw) // 2) if x_val == -1 else x_val
+            w_setup.setcolor(color, BLACK)
+            w_setup.set_textpos(lcd, y, final_x)
+            w_setup.printstring(text)
 
+        # Draw Setup Screen
+        print_safe("Iris Setup", 20, -1, YELLOW) 
+        print_safe("1) Connect to WiFi:", 80, 60, WHITE)
+        print_safe("Iris Classic", 110, 90, YELLOW) 
+        print_safe("2) Visit in browser:", 160, 60, WHITE)
+        print_safe("{}".format(ip), 190, 90, YELLOW) 
+        
+        lcd.show()
+        
         import setup_server
         setup_server.run()
         return
 
-    # 7. Normal Boot
+    # 4. NORMAL FLOW (Logo only shows if config exists)
+    lcd = init_lcd()
+    if lcd:
+        draw_boot_logo(lcd)
+    
+    apply_staged_bootloader_if_present()
+    
+    try:
+        led = machine.Pin("LED", machine.Pin.OUT)
+        led.on()
+    except: pass
+
+    log("BOOTLOADER: Starting Normal Boot...")
+
+    # 5. Normal Boot WiFi Connection
     ssid, pwd = load_config_wifi()
     if not ssid or not connect_wifi(lcd, ssid, pwd):
         log("WiFi Failed.")
         if lcd:
-            lcd.fill(0x0000) # BLACK 
-            lcd.text("WIFI FAILED", 40, 15, 0xFC00) # RED
-            lcd.text("1. Power cycle", 10, 40, 0xFFFF)
-            lcd.text("   your Iris", 10, 50, 0xFFFF)
-            lcd.text("2. Power cycle", 10, 70, 0xFFFF)
-            lcd.text("   your router", 10, 80, 0xFFFF)
-            lcd.text("3. Factory Reset", 10, 100, 0xFFFF)
-            lcd.text("   to reconfigure", 10, 110, 0xFFFF)
+            # We need a font for the error screen
+            import config_font as font_err 
+            w_err = CWriter(lcd, font_err, fgcolor=RED, bgcolor=BLACK, verbose=False)
+            lcd.fill(BLACK)
+            
+            err_title = "WIFI FAILED"
+            tx = (320 - w_err.stringlen(err_title)) // 2
+            w_err.set_textpos(lcd, 20, tx)
+            w_err.printstring(err_title)
+            
+            w_err.setcolor(WHITE, BLACK)
+            w_err.set_textpos(lcd, 60, 10)
+            w_err.printstring("Check Credentials in Portal")
             lcd.show()
         return
 
-    # 8. Check for Updates
+    # 6. Check for Updates
     log("Checking for updates...")
     vers_data = fetch_versions_json(lcd)
-    
     if vers_data:
-        if vers_data.get("remote_command") == "reboot":
-            machine.reset()
-            
+        # ... (keep your existing update logic here) ...
         remote_v = (vers_data.get("version") or "0.0.0").strip()
         local_v = "0.0.0"
         try:
             with open(LOCAL_VERSION_FILE, "r") as f: local_v = f.read().strip()
         except: pass
-
         if (local_v != remote_v) or vers_data.get("force_update"):
             perform_update(vers_data, lcd, force=True)
             return 
-    
-    # 9. Success - Run App
+
+    # 7. Success - Run App
     run_app_main(lcd)
 
 if __name__ == "__main__":
