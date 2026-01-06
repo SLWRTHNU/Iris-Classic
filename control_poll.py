@@ -2,62 +2,119 @@
 import utime as time
 import network
 import machine
-import bootloader
+import urequests as requests
+import json
+import os
 
-# Check every 60 seconds
-CONTROL_POLL_MS = 60_000 
+CONTROL_POLL_MS = 60_000 # 5 seconds for testing
 _last_poll_ms = 0
+LAST_REBOOT_REV_FILE = "last_control_hash.txt"
 
-def _wifi_connected():
+def _get_device_id():
     try:
-        sta = network.WLAN(network.STA_IF)
-        return sta.active() and sta.isconnected()
-    except:
-        return False
+        with open("device_id.txt", "r") as f:
+            return f.read().strip()
+    except: return "N/A"
+
+def _get_last_reboot_rev():
+    try:
+        with open(LAST_REBOOT_REV_FILE, "r") as f:
+            return f.read().strip()
+    except: return ""
+
+def _save_reboot_rev(rev):
+    try:
+        # Strip any whitespace to ensure exact matches
+        rev_str = str(rev).strip()
+        print("APP: Syncing version files to [{}]...".format(rev_str))
+        
+        # 1. Update the poll record
+        with open("last_control_hash.txt", "w") as f:
+            f.write(rev_str)
+            
+        # 2. Update the bootloader record
+        with open("local_version.txt", "w") as f:
+            f.write(rev_str)
+            
+        # 3. Force a sync to the physical disk
+        import os
+        if hasattr(os, 'sync'):
+            os.sync()
+            
+        print("APP: Sync complete.")
+    except Exception as e:
+        print("APP: Save error:", e)
+
+def fetch_control_json():
+    r = None
+    try:
+        # Hardcoded, direct URL
+        url = "https://raw.githubusercontent.com/SLWRTHNU/Iris-Classic/main/control.json"
+        
+        # Adding a basic header
+        headers = {'User-Agent': 'MicroPython'}
+        
+        r = requests.get(url, headers=headers)
+        
+        print("POLL: Status Code", r.status_code)
+        
+        if r.status_code == 200:
+            return r.json()
+            
+        return None
+    except Exception as e:
+        print("POLL: Fetch Error:", e)
+        return None
+    finally:
+        if r:
+            try: r.close()
+            except: pass
 
 def tick(lcd=None):
-    """
-    Checks for remote updates or reboot commands while the app is running.
-    """
     global _last_poll_ms
-
     now = time.ticks_ms()
-    # Skip if it's not time yet
-    if _last_poll_ms and time.ticks_diff(now, _last_poll_ms) < CONTROL_POLL_MS:
+    
+    if _last_poll_ms != 0 and time.ticks_diff(now, _last_poll_ms) < CONTROL_POLL_MS:
         return
 
+    print("--- POLL START ---")
     _last_poll_ms = now
 
-    if not _wifi_connected():
+    sta = network.WLAN(network.STA_IF)
+    if not (sta.active() and sta.isconnected()):
         return
 
     try:
-        print("APP: Checking for remote commands...")
-        # Single-Trip: fetch the version data which now holds commands too
-        vers_data = bootloader.fetch_versions_json(lcd)
-        
-        if vers_data:
-            # 1. Check for Reboot Command
-            if vers_data.get("remote_command") == "reboot":
-                print("APP: Remote reboot received.")
-                machine.reset()
+        data = fetch_control_json()
+        if not data: return
 
-            # 2. Check for Version Mismatch
-            local_v = "0.0.0"
-            try:
-                with open("local_version.txt", "r") as f:
-                    local_v = f.read().strip()
-            except:
-                pass
+        my_id = str(_get_device_id()).strip()
+        remote_rev = str(data.get("rev", "")).strip()
+        reboot_ids = [str(x) for x in data.get("reboot_ids", [])]
+        last_rev = _get_last_reboot_rev()
 
-            remote_v = (vers_data.get("version") or "0.0.0").strip()
-            force_update = vers_data.get("force_update", False)
+        print("POLL: ID [{}] | Remote [{}] | Local [{}]".format(my_id, remote_rev, last_rev))
 
-            # If there's a new version, just reboot. 
-            # The bootloader will see the difference and perform the update.
-            if force_update or (remote_v != local_v):
-                print("APP: Update detected ({} -> {}). Rebooting...".format(local_v, remote_v))
-                machine.reset()
-
+        if my_id in reboot_ids:
+            if remote_rev != "" and remote_rev != last_rev:
+                print("POLL: NEW COMMAND DETECTED!")
+                _save_reboot_rev(remote_rev)
+                
+                # Verify it saved before we pull the plug
+                if _get_last_reboot_rev() == remote_rev:
+                    print("REBOOTING VIA WATCHDOG...")
+                    time.sleep(2) # IMPORTANT: Let the file system finish writing
+                    
+                    # This forces a hard hardware reset
+                    machine.WDT(timeout=1000) 
+                    while True:
+                        pass # Wait for the dog to bite
+                else:
+                    print("CRITICAL: Write failed, reboot cancelled.")
+            else:
+                print("POLL: No new revision.")
+        else:
+            print("POLL: My ID not targeted.")
+            
     except Exception as e:
-        print("APP: control poll failed:", repr(e))
+        print("POLL: Logic Error:", e)
