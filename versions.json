@@ -1,23 +1,9 @@
 {
   "model": "classic",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "remote_command": "none",
   "force_update": false,
 "files": [
-    { "path": "main.py", "target": "main.py" },
-    { "path": "bootloader.py", "target": "bootloader.py" },
-    { "path": "app_main.py", "target": "app_main.py" },
-    { "path": "control_poll.py", "target": "control_poll.py" },
-    { "path": "setup_server.py", "target": "setup_server.py" },
-    { "path": "Pico_LCD_2_8.py", "target": "Pico_LCD_2_8.py" },
-    { "path": "writer.py", "target": "writer.py" },
-    { "path": "config_font.py", "target": "config_font.py" },
-    { "path": "small_font.py", "target": "small_font.py" },
-    { "path": "age_small_font.py", "target": "age_small_font.py" },
-    { "path": "large_font.py", "target": "large_font.py" },
-    { "path": "arrows_font.py", "target": "arrows_font.py" },
-    { "path": "delta.py", "target": "delta.py" },
-    { "path": "heart.py", "target": "heart.py" },
-    { "path": "logo.bin", "target": "logo.bin" }
+    { "path": "control_poll.py", "target": "control_poll.py" }
   ]
 }
