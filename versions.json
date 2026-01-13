@@ -4,7 +4,6 @@
   "remote_command": "none",
   "force_update": false,
 "files": [
-    { "path": "logo.bin", "target": "logo.bin" },
     { "path": "Pico_LCD_2_8.py", "target": "Pico_LCD_2_8.py" },
     { "path": "age_small_font.py", "target": "age_small_font.py" },
     { "path": "app_main.py", "target": "app_main.py" },
