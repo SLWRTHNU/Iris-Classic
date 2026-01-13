@@ -420,26 +420,26 @@ def main():
         ap.config(essid="Iris Classic", security=0)
         ip = "192.168.4.1"
 
-        if lcd:
-            YELLOW = 0xF81F
-            M, LH, IND = 8, 14, 12
-            w = 160
-            
-            def _text_w_px(s): return len(s) * 8
-            def text_center(s, y, color, w=160):
-                x = max(0, (w - _text_w_px(s)) // 2)
-                lcd.text(s, x, y, color)
+        # Initialize Setup UI
+        w_setup = CWriter(lcd, config_font, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+        w_setup.set_spacing(2) 
+        lcd.fill(BLACK)
 
-            lcd.fill(BLACK)
-            text_center("IRIS SETUP", M, YELLOW, w=w)
-            text_center("Follow these steps:", M + LH, WHITE, w=w)
-            y = M + (LH * 3)
-            lcd.text("1) Connect to WiFi:", M, y, WHITE); y += LH
-            lcd.text("   Iris Mini", M + IND, y, YELLOW); y += (LH + 15)
-            lcd.text("2) Open this URL:", M, y, WHITE); y += LH
-            # Put the http back for clarity
-            lcd.text("   {}".format(ip), M + IND, y, YELLOW)
-            lcd.show()
+        def print_safe(text, y, x_val, color):
+            tw = w_setup.stringlen(text)
+            final_x = max(0, (320 - tw) // 2) if x_val == -1 else x_val
+            w_setup.setcolor(color, BLACK)
+            w_setup.set_textpos(lcd, y, final_x)
+            w_setup.printstring(text)
+
+        # Draw Setup Screen
+        print_safe("Iris Setup", 20, -1, YELLOW) 
+        print_safe("1) Connect to WiFi:", 80, 60, WHITE)
+        print_safe("Iris Classic", 110, 90, YELLOW) 
+        print_safe("2) Visit in browser:", 160, 60, WHITE)
+        print_safe("{}".format(ip), 190, 90, YELLOW) 
+        
+        lcd.show()
         
         import setup_server
         setup_server.run()
