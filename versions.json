@@ -1,11 +1,9 @@
 {
   "model": "classic",
-  "version": "1.0.2",
+  "version": "1.0.1",
   "remote_command": "none",
   "force_update": false,
 "files": [
-  { "path": "control_poll.py", "target": "control_poll.py" },
-  { "path": "last_control_hash.txt", "target": "last_control_hash.txt" },
-  { "path": "local_version.txt", "target": "local_version.txt" }
+  { "path": "app_main.py", "target": "app_main.py" }
   ]
 }
