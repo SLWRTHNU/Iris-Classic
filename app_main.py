@@ -9,16 +9,14 @@ import network
 import ntptime
 import urequests as requests
 import gc
-from machine import Timer
+from machine import Timer, WDT, reset
 import control_poll
 
-# Optional: not all MicroPython builds have setdefaulttimeout()
-try:
-    import socket
-    if hasattr(socket, "setdefaulttimeout"):
-        socket.setdefaulttimeout(2)
-except Exception:
-    pass
+def log(msg):
+    gc.collect() 
+    free = gc.mem_free()
+    timestamp = utime.ticks_ms()
+    print("[{:>8}ms] [RAM Free: {:>5}B] {}".format(timestamp, free, msg))
 
 # ---------- Config ----------
 import config
@@ -31,7 +29,7 @@ def cfg(name, default):
 WIFI_SSID = cfg('WIFI_SSID', '')
 WIFI_PASSWORD = cfg('WIFI_PASSWORD', '')
 NS_URL = cfg('NS_URL', '')
-NS_TOKEN = cfg('API_SECRET', '')     # Matches 'token' in portal
+NS_TOKEN = cfg('API_SECRET', '')
 API_ENDPOINT = cfg('API_ENDPOINT', '/api/v1/entries/sgv.json?count=2')
 DISPLAY_UNITS = cfg('UNITS', 'mmol')
 
@@ -83,56 +81,66 @@ def get_device_id():
     except Exception:
         return "N/A"
 
-def connect_wifi(ssid, pwd, timeout_sec=12):
+def connect_wifi(ssid, pwd, timeout_sec=15):
     sta = network.WLAN(network.STA_IF)
     sta.active(True)
-    if sta.isconnected():
-        return True
+    sta.config(pm=0xa11140) 
+    
+    if sta.isconnected(): return True
+    log("Connecting WiFi...")
     sta.connect(ssid, pwd)
     t0 = utime.ticks_ms()
     while not sta.isconnected():
         if utime.ticks_diff(utime.ticks_ms(), t0) > timeout_sec * 1000:
             return False
-        utime.sleep(0.25)
+        utime.sleep(0.5)
     return True
 
-def ntp_sync(retries=3, delay_s=1):
-    for _ in range(retries):
-        try:
-            ntptime.settime()
-            return True
-        except Exception:
-            utime.sleep(delay_s)
-    return False
+
+def ntp_sync():
+    try:
+        before = now_unix_s()
+        ntptime.settime()
+        after = now_unix_s()
+        drift = after - before
+        log("NTP Sync Successful. Drift: {}s".format(drift))
+        return True
+    except Exception as e:
+        log("NTP Sync Failed: {}".format(e))
+        return False
+
 
 def ensure_count2(endpoint: str) -> str:
-    if "count=" in endpoint:
-        return endpoint.replace("count=1", "count=2")
+    if "count=" in endpoint: return endpoint.replace("count=1", "count=2")
     joiner = "&" if "?" in endpoint else "?"
     return endpoint + joiner + "count=2"
 
+
 def fetch_ns_entries():
-    headers = {}
-    if NS_TOKEN:
-        headers["api-secret"] = NS_TOKEN
-    ep = ensure_count2(API_ENDPOINT)
-    url = NS_URL + ep
+    gc.collect() # Clean up before starting
+    headers = {
+        "Accept": "application/json",
+        "Connection": "close"  # <--- Crucial: Tells server to kill the socket
+    }
+    if NS_TOKEN: headers["api-secret"] = NS_TOKEN
+    url = NS_URL + ensure_count2(API_ENDPOINT)
     resp = None
     try:
-        resp = requests.get(url, headers=headers)
-        data = resp.json()
-        resp.close()
-        return data
-    except Exception:
-        try:
-            if resp: resp.close()
-        except Exception: pass
-        return None
+        # Reduced timeout to 5s to stay well under the 8s Watchdog
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        log("Fetch error: {}".format(e))
+    finally:
+        if resp:
+            resp.close()
+            del resp
+        gc.collect() # <--- Force cleanup of the socket memory immediately
+    return None
 
 def mgdl_to_units(val_mgdl: float) -> float:
-    if str(DISPLAY_UNITS).lower() == "mgdl":
-        return float(val_mgdl)
-    return round(float(val_mgdl) / 18.0, 1)
+    if str(DISPLAY_UNITS).lower() == "mgdl": return float(val_mgdl)
 
 def direction_to_arrow(direction: str) -> str:
     return {
@@ -178,35 +186,17 @@ def parse_entries(data):
     }
 
 def fmt_bg(bg_val: float) -> str:
-    if str(DISPLAY_UNITS).lower() == "mgdl":
-        return str(int(round(bg_val)))
-    return "{:.1f}".format(bg_val)
+    return str(int(round(bg_val))) if str(DISPLAY_UNITS).lower() == "mgdl" else "{:.1f}".format(bg_val)
 
-def draw_logo_simple(lcd):
-    """Re-draws the logo.bin directly to the LCD buffer"""
-    expected = 153600 # 320x240 * 2 bytes
-    try:
-        with open("logo.bin", "rb") as f:
-            chunk_size = 4096
-            # Read in chunks to prevent memory errors
-            for i in range(0, expected, chunk_size):
-                lcd.buffer[i:i+chunk_size] = f.read(chunk_size)
-    except Exception:
-        lcd.fill(BLACK) # Fallback if file is missing
         
 def fmt_delta(delta_val) -> str:
     if delta_val is None: return ""
-    if str(DISPLAY_UNITS).lower() == "mgdl":
-        return "{:+.0f}".format(delta_val)
-    return "{:+.1f}".format(delta_val)
-
-UNIX_2000_OFFSET = 946684800
+    return "{:+.0f}".format(delta_val) if str(DISPLAY_UNITS).lower() == "mgdl" else "{:+.1f}".format(delta_val)
+    
 
 def now_unix_s():
     t = utime.time()
-    if t < 1200000000:
-        return t + UNIX_2000_OFFSET
-    return t
+    return t + UNIX_2000_OFFSET if t < 1200000000 else t
 
 def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon, last, hb_state, heart_only=False): 
     W, H = lcd.width, lcd.height # 320, 240
@@ -227,8 +217,13 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
         if hb_state:
             w_heart.setcolor(BLACK, RED)
             w_heart.set_textpos(lcd, y_heart, x_heart)
-            w_heart.printstring("T", invert=True)
-        lcd.show() # Standard show for the 2.8 driver
+            w_heart.printstring("T")
+        
+        # Performance: Use show_rect if your driver supports it, else standard show
+        if hasattr(lcd, "show_rect"):
+            lcd.show_rect(x_heart, y_heart, heart_w, heart_h)
+        else:
+            lcd.show()
         return
 
     # --- LOADING STATE ---
@@ -405,32 +400,26 @@ def main(lcd=None):
     w_delta_icon = CWriter(lcd, font_delta, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
     w_arrow.set_spacing(8)
 
-    # Initial Loading Call
-    draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon, last, hb_state, heart_only=False)
-
-    connect_wifi(WIFI_SSID, WIFI_PASSWORD)
-    ntp_sync()
+    # Initial Screen Setup
+    draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon, None, hb_state)
     
-    # Timing Intervals
-    GLUCOSE_INTERVAL = 5000  # 5 seconds
-    CONTROL_INTERVAL = 60000  # 60 seconds 
-
-    next_glucose = utime.ticks_ms()
-    next_control = utime.ticks_ms() + 5000
+    if connect_wifi(WIFI_SSID, WIFI_PASSWORD): 
+        ntp_sync()
     
-    # Track the last state we actually drew to avoid over-refreshing
-    last_drawn_hb = hb_state 
-
-    # Define the timer callback
-    def toggle_heart(t):
+    # --- UPDATED TIMING INTERVALS ---
+    GLUCOSE_INTERVAL = 15000    # 15 seconds
+    CONTROL_INTERVAL = 300000   # 5 minutes (Corrected)
+    
+    next_glucose = utime.ticks_ms() + 1000
+    next_control = utime.ticks_ms() + 30000 # First check 30s after boot
+    
+    # Safe Heartbeat Toggle
+    def toggle_hb(t):
         global hb_state
         hb_state = not hb_state
 
-    # Initialize Timer 0 to blink every 500ms
-    #heart_timer = Timer(-1)
-    #heart_timer.init(period=500, mode=Timer.PERIODIC, callback=toggle_heart)
-    heart_blink_speed = 1000  # Milliseconds
-    next_heart_flip = utime.ticks_ms() + heart_blink_speed
+    heart_timer = Timer(-1)
+    heart_timer.init(period=1000, mode=Timer.PERIODIC, callback=toggle_hb)
 
     while True:
         wdt.feed() # Pat the dog
@@ -445,17 +434,13 @@ def main(lcd=None):
             if sta.isconnected():
                 ntp_sync()
 
-        # 1. Heartbeat Blink
-        if utime.ticks_diff(now, next_heart_flip) >= 0:
-            hb_state = not hb_state
-            next_heart_flip = utime.ticks_add(now, heart_blink_speed)
-            
-            # Draw the heart update
-            if last is not None:
-                draw_screen(lcd, w_small, w_age_small, w_big, w_arrow,
-                            w_heart, w_delta_icon, last, hb_state, heart_only=True)
-            
-        # 2. Glucose Fetch
+       # 1. Heartbeat Blink
+        if hb_state != last_drawn_hb:
+            last_drawn_hb = hb_state
+            if last: 
+                draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon, last, hb_state, heart_only=True)
+                
+        # 2. Glucose Fetch (15s)
         if utime.ticks_diff(now, next_glucose) >= 0:
             log("Fetching Glucose...")
             data = fetch_ns_entries()
@@ -468,13 +453,18 @@ def main(lcd=None):
             next_glucose = utime.ticks_add(now, GLUCOSE_INTERVAL)
             gc.collect()
 
-        # 3. Control/Update Poll
+       # 3. Control Poll (5m)
         if utime.ticks_diff(now, next_control) >= 0:
+            log("Checking for Control Updates...")
             control_poll.tick(lcd)
             next_control = utime.ticks_add(now, CONTROL_INTERVAL)
         
-        utime.sleep_ms(50)
-        
+        utime.sleep_ms(100)
         
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print("CRITICAL CRASH:", e)
+        utime.sleep(5)
+        reset()
