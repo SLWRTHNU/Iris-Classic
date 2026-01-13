@@ -185,7 +185,8 @@ def parse_entries(data):
         "delta": delta_units,
     }
 
-def fmt_bg(bg_val: float) -> str:
+
+def fmt_bg(bg_val) -> str:
     return str(int(round(bg_val))) if str(DISPLAY_UNITS).lower() == "mgdl" else "{:.1f}".format(bg_val)
 
         
@@ -202,17 +203,21 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
     W, H = lcd.width, lcd.height # 320, 240
     
     # --- POSITIONAL CONSTANTS ---
-    y_age = 8  # Lowered for the bigger screen
-    heart_right_margin = 10 
+    # These must be defined first so both full and partial draws use the same math
+    W, H = lcd.width, lcd.height
+    y_age = 6
+    heart_right_margin = 4
     age_small_h = age_font_small.height()
     heart_h = font_heart.height()
     heart_w = w_heart.stringlen("T")
     
+    # Calculate Heart Position
     x_heart = W - heart_right_margin - heart_w
-    y_heart = y_age + (age_small_h - heart_h) // 2
+    y_heart = y_age + (age_small_h - heart_h) // 4
 
     # --- PARTIAL DRAW (Heart Blink) ---
     if heart_only:
+        # Erase just the heart area
         lcd.fill_rect(x_heart, y_heart, heart_w, heart_h, BLACK)
         if hb_state:
             w_heart.setcolor(BLACK, RED)
@@ -228,33 +233,20 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
 
     # --- LOADING STATE ---
     if not last:
-        # 1. Dimensions (Classic Style)
-        BAR_HEIGHT = 12
-        Y_BAR = 229
+        BAR_HEIGHT = 11
+        Y_POS = 128 - BAR_HEIGHT + 1
         STATUS_X = 3
-        TEXT_Y_OFFSET = 0
-
-        # 2. Draw the Logo FIRST
-        draw_logo_simple(lcd)
-        
-        # 3. Draw the White Background Bar over the logo
-        lcd.fill_rect(0, Y_BAR, W, BAR_HEIGHT, WHITE)
-        
-        # 4. Left Text (Status)
-        lcd.text("Loading", STATUS_X, Y_BAR + TEXT_Y_OFFSET, BLACK)
-        
-        # 5. Right Text (ID)
         device_id = get_device_id()
         id_text = "ID:{}".format(device_id)
-        id_x = W - (len(id_text) * 8) - 3 
-        lcd.text(id_text, id_x, Y_BAR + TEXT_Y_OFFSET, BLACK)
-        
+        lcd.fill_rect(0, Y_POS, lcd.width, BAR_HEIGHT, WHITE)
+        lcd.text("Loading", STATUS_X, Y_POS, BLACK)
+        id_x = lcd.width - (len(id_text) * 8) - 3
+        lcd.text(id_text, id_x, Y_POS, BLACK)
         lcd.show()
-        return
+        return         
 
     # --- FULL DATA STATE DRAW ---
     lcd.fill(BLACK)
-    
     M = 4 
     
     raw_s = last["time_ms"] // 1000
@@ -265,12 +257,13 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
     bg_val = last["bg"]
     #bg_val = "88.8"
     direction = last["direction"]
+    #direction = last["direction"]
     bg_text = fmt_bg(bg_val)
-    #bg_text = "0"
+    #bg_text = "88.8"
     arrow_text = last["arrow"]
-    #arrow_text = "B"
+    #arrow_text = "44"
     delta_text = fmt_delta(last["delta"])
-    #delta_text = "+8.8"
+    #delta_text = "8.8
     age_text = "{} {} ago".format(mins, "min" if mins == 1 else "mins")
     #age_text = "88 mins ago"
     
@@ -293,101 +286,77 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
     arrow_h = font_arrows.height()
     bottom_h = max(small_h, arrow_h)
 
-    y_bg = (H - font_big.height()) // 2
-    y_bottom_base = H - max(font_small.height(), font_arrows.height())
+    y_bg = (H - big_h) // 2
+    y_bottom_base = H - bottom_h - 1
     
     # Arrow Position
-    arrow_offset = 0
+    arrow_offset = -2 
     y_arrow = (y_bottom_base + (bottom_h - arrow_h) // 2) + arrow_offset
-    
-    # --- CHANGE THIS LINE ---
-    delta_v_offset = 0  # Increase this number to move the number further DOWN
-    y_delta = (y_bottom_base + (bottom_h - small_h) // 2) + delta_v_offset
+    y_delta = y_bottom_base + (bottom_h - small_h) // 2
 
     # Draw Age
-    heart_age_gap = 10
+    heart_age_gap = 6
     age_w = w_age_small.stringlen(age_text)
-    x_age = (W - age_w) // 2
-    
+    x_age = x_heart - age_w - heart_age_gap
     w_age_small.setcolor(BLACK, age_color)
     w_age_small.set_textpos(lcd, y_age, x_age)
-    w_age_small.printstring(age_text, invert=True)
+    w_age_small.printstring(age_text)
 
     # Draw Heart (Full Draw Phase)
     if hb_state:
         w_heart.setcolor(BLACK, RED)
         w_heart.set_textpos(lcd, y_heart, x_heart)
-        w_heart.printstring("T", invert=True)
+        w_heart.printstring("T")
 
-    # --- Draw BG (Perfectly Centered) ---
+    # Draw BG
     w_big.setcolor(BLACK, bg_color)
-    
-    # Recalculate width based on the current text (e.g., "8.8" vs "88.8")
-    bg_width = w_big.stringlen(bg_text)
-    x_bg = (W - bg_width) // 2
-    
-    # Recalculate vertical center
-    bg_height = font_big.height()
-    y_bg = (H - bg_height) // 2
-    
+    x_bg = (W - w_big.stringlen(bg_text)) // 2
     w_big.set_textpos(lcd, y_bg, x_bg)
-    w_big.printstring(bg_text, invert=True)
+    w_big.printstring(bg_text)
 
     # Draw Trend Arrow
     w_arrow.setcolor(BLACK, arrow_color)
     w_arrow.set_textpos(lcd, y_arrow, 10) 
-    w_arrow.printstring(arrow_text, invert=True)
+    w_arrow.printstring(arrow_text)
 
     # Draw Delta (Fixed Sign Logic)
-    # --- Update this section in draw_screen ---
     if delta_text:
-        sign = delta_text[0]
-        val_num = delta_text[1:]
+        sign = delta_text[0]  # Correctly pulls + or -
+        val_num = delta_text[1:] 
         
-        gap = 10
-        right_margin = 10
+        gap = 5          
+        v_offset = -5
         
         w_small.setcolor(BLACK, WHITE)
         w_delta_icon.setcolor(BLACK, WHITE)
         
         h_small = font_small.height()
         h_delta = font_delta.height()
-        
-        # MATH FOR VERTICAL CENTERING:
-        # We take the Y of the number (y_delta), add half the height of the number font,
-        # then subtract half the height of the icon font.
-        y_delta_centered = y_delta + (h_small // 2) - (h_delta // 2) - 8
-        
+        y_delta_centered = y_delta + (h_small - h_delta) // 2 + v_offset
+
         num_w = w_small.stringlen(val_num)
         sign_w = w_delta_icon.stringlen(sign)
         
-        x_num = W - right_margin - num_w
+        x_num = W - M - num_w
         x_sign = x_num - sign_w - gap
         
         w_delta_icon.set_textpos(lcd, y_delta_centered, x_sign)
-        w_delta_icon.printstring(sign, invert=True)
+        w_delta_icon.printstring(sign)
         
         w_small.set_textpos(lcd, y_delta, x_num)
-        w_small.printstring(val_num, invert=True)
+        w_small.printstring(val_num)
 
     lcd.show()
 
+# ---------- Main Loop ----------
+
 def main(lcd=None):
+    log("--- SYSTEM START / REBOOT ---")
+    wdt = WDT(timeout=8000) # Hardware fail-safe
+    
     global hb_state
-    gc.collect()
-
-    # --- 1. INITIALIZE VARIABLES (The Fix) ---
-    last = None            # Current glucose data
-    last_hb_state = None   # Track heartbeat changes
-    # ------------------------------------------
-
-    if lcd is None:
-        lcd = LCD_Driver()
-
-    if not hasattr(lcd, "show") and hasattr(lcd, "show_up"):
-        def _show():
-            lcd.show_up()
-        lcd.show = _show
+    last, last_drawn_hb = None, hb_state 
+    if lcd is None: lcd = LCD_Driver()
 
     # Initialize Writers
     w_small = CWriter(lcd, font_small, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
