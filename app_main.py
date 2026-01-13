@@ -149,27 +149,31 @@ def direction_to_arrow(direction: str) -> str:
 
 
 def parse_entries(data):
-    if not data or not isinstance(data, list) or len(data) < 1:
+    if not data or not isinstance(data, list) or len(data) < 1: 
         return None
+        
     cur = data[0]
-    if "sgv" not in cur or "date" not in cur:
+    cur_mgdl = cur.get("sgv")
+    cur_time_ms = int(cur.get("mills", cur.get("date", 0)))
+    
+    if cur_mgdl is None or cur_time_ms == 0: 
         return None
-    cur_mgdl = cur["sgv"]
-    cur_time_ms = cur["date"]
-    direction = cur.get("direction", "NONE")
+    
     delta_units = None
-    if len(data) > 1 and isinstance(data[1], dict) and "sgv" in data[1]:
-        prev_mgdl = data[1]["sgv"]
-        delta_mgdl = float(cur_mgdl) - float(prev_mgdl)
-        if str(DISPLAY_UNITS).lower() == "mgdl":
-            delta_units = float(delta_mgdl)
-        else:
-            delta_units = round(delta_mgdl / 18.0, 1)
+    if len(data) > 1 and "sgv" in data[1]:
+        prev_mgdl = data[1].get("sgv")
+        if prev_mgdl is not None:
+            delta_mgdl = float(cur_mgdl) - float(prev_mgdl)
+            if str(DISPLAY_UNITS).lower() == "mgdl":
+                delta_units = delta_mgdl
+            else:
+                delta_units = round(delta_mgdl / 18.0, 1)
+        
     return {
         "bg": mgdl_to_units(cur_mgdl),
-        "time_ms": int(cur_time_ms),
-        "direction": direction,
-        "arrow": direction_to_arrow(direction),
+        "time_ms": cur_time_ms,
+        "direction": cur.get("direction", "NONE"),
+        "arrow": direction_to_arrow(cur.get("direction")),
         "delta": delta_units,
     }
 
@@ -429,9 +433,19 @@ def main(lcd=None):
     next_heart_flip = utime.ticks_ms() + heart_blink_speed
 
     while True:
+        wdt.feed() # Pat the dog
         now = utime.ticks_ms()
+        
+        # Network connection check - reboots if failed
+        sta = network.WLAN(network.STA_IF)
+        if not sta.isconnected():
+            log("WiFi lost. Attempting reconnect...")
+            connect_wifi(WIFI_SSID, WIFI_PASSWORD)
+            # If we just reconnected, sync time again
+            if sta.isconnected():
+                ntp_sync()
 
-        # --- Heartbeat Software Timing ---
+        # 1. Heartbeat Blink
         if utime.ticks_diff(now, next_heart_flip) >= 0:
             hb_state = not hb_state
             next_heart_flip = utime.ticks_add(now, heart_blink_speed)
