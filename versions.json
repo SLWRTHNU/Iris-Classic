@@ -10,6 +10,7 @@
     { "path": "app_main.py", "target": "app_main.py" },
     { "path": "arrows_font.py", "target": "arrows_font.py" },
     { "path": "bootloader.py", "target": "bootloader.py" },
+    { "path": "config_font.py", "target": "config_font.py" },
     { "path": "control_poll.py", "target": "control_poll.py" },
     { "path": "delta.py", "target": "delta.py" },
     { "path": "heart.py", "target": "heart.py" },
