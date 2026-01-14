@@ -3,6 +3,22 @@ import machine
 import utime
 import gc
 import network
+import os
+
+
+def guarded_reset(reason=""):
+    try:
+        if "no_reset.flag" in os.listdir():
+            try:
+                print("RESET SKIPPED (no_reset.flag): {}".format(reason))
+            except:
+                pass
+            return False
+    except:
+        pass
+
+    machine.reset()
+    return True
 
 # --- Helpers ---
 def log(msg):
@@ -155,7 +171,9 @@ def run():
         s.listen(1)
     except Exception as e:
         log("Bind Error: {}".format(e))
-        machine.reset()
+        guarded_reset("setup_server bind failed")
+        return
+
 
     while True:
         gc.collect()
@@ -200,10 +218,10 @@ def run():
                 
                 # Hard Reset via Watchdog
                 utime.sleep(2)
-                log("Hard Resetting...")
-                from machine import WDT
-                wdt = WDT(timeout=10)
-                while True: pass
+                log("Rebooting...")
+                guarded_reset("setup_server save")
+                return
+
             
             # 3. Serve Form
             else:
@@ -212,5 +230,11 @@ def run():
                 
         except Exception as e:
             log("Server Error: {}".format(e))
-            if cl: cl.close()
+            if cl:
+                try: cl.close()
+                except: pass
+
+
+
+
 
