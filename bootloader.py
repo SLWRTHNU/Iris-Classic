@@ -377,8 +377,6 @@ def perform_update(vers_data, lcd):
         machine.reset()
 
 
-
-
 def run_app_main(lcd=None):
     gc.collect()
     log("Handoff -> app_main")
