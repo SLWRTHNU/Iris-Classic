@@ -210,6 +210,28 @@ def now_unix_s():
     t = utime.time()
     return t + UNIX_2000_OFFSET if t < 1200000000 else t
 
+def draw_bottom_status(lcd, status_msg, show_id=None):
+    if lcd is None: return
+    # Show ID if connecting or if an error starts with ERR
+    if show_id is None:
+        show_id = any(status_msg.startswith(x) for x in ["Connecting", "Connected", "ERR:"])
+
+    # Draw status bar at the bottom
+    lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
+    lcd.text(status_msg, STATUS_X, Y_POS, BLACK)
+
+    if show_id:
+        device_id = "N/A"
+        try:
+            if DEVICE_ID_FILE in os.listdir():
+                with open(DEVICE_ID_FILE, "r") as f:
+                    device_id = f.read().strip()
+        except: pass
+        id_text = "ID:{}".format(device_id)
+        id_x = lcd.width - (len(id_text) * 8) - 3
+        lcd.text(id_text, id_x, Y_POS, BLACK)
+    lcd.show()
+
 def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon, last, hb_state, heart_only=False): 
     W, H = lcd.width, lcd.height # 320, 240
     
@@ -244,15 +266,9 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
 
     # --- LOADING STATE ---
     if not last:
-        BAR_HEIGHT = 12
-        Y_POS =  229 - BAR_HEIGHT
-        STATUS_X = 3
         device_id = get_device_id()
         id_text = "ID:{}".format(device_id)
-        lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
-        lcd.text("Loading", STATUS_X, Y_POS, BLACK)
-        id_x = lcd.width - (len(id_text) * 8) - 3
-        lcd.text(id_text, id_x, Y_POS, BLACK)
+        draw_bottom_status(lcd, "Loading", show_id=True)
         lcd.show()
         return         
 
@@ -448,6 +464,7 @@ if __name__ == "__main__":
         print("CRITICAL CRASH:", e)
         utime.sleep(5)
         reset()
+
 
 
 
