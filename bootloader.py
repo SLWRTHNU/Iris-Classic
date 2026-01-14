@@ -6,9 +6,22 @@ import os
 import gc
 import ubinascii
 import machine
-import sys
-import utime
 from writer import CWriter
+
+def guarded_reset(reason=""):
+    try:
+        if "no_reset.flag" in os.listdir():
+            try:
+                print("RESET SKIPPED (no_reset.flag): {}".format(reason))
+            except:
+                pass
+            return False
+    except:
+        pass
+
+    machine.reset()
+    return True
+
 
 
 # 0. SPEED BOOST: Overclock to 240MHz 
@@ -22,7 +35,6 @@ def log(msg):
 GITHUB_USER   = "SLWRTHNU"
 GITHUB_REPO   = "Iris-Classic"
 GITHUB_BRANCH = "main"
-RAW_BASE_URL  = "https://raw.githubusercontent.com/{}/{}/{}/".format(GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH)
 API_BASE      = "https://api.github.com/repos/{}/{}/contents/".format(GITHUB_USER, GITHUB_REPO)
 
 VERSIONS_PATH = "versions.json"
@@ -151,7 +163,7 @@ def connect_wifi(lcd, ssid, pwd, timeout_sec=15, retries=2):
         return False
 
     draw_bottom_status(lcd, "Connecting")
-    
+
     # Ensure Access Point is fully OFF
     ap = network.WLAN(network.AP_IF)
     if ap.active():
@@ -159,53 +171,59 @@ def connect_wifi(lcd, ssid, pwd, timeout_sec=15, retries=2):
         time.sleep_ms(500)
 
     sta = network.WLAN(network.STA_IF)
-    
+
     try:
         network.hostname("Iris-Classic")
-    except: pass
+    except:
+        pass
 
     for attempt in range(1, retries + 1):
         log("WiFi Attempt {}/{}".format(attempt, retries))
-        
+
         # Hard reset the STA interface for a clean slate
         sta.active(False)
         time.sleep_ms(500)
         sta.active(True)
-        
-        # CRITICAL: Re-apply PM fix for Pico 2 W stability
+
+        # Re-apply PM fix for Pico 2 W stability
         try:
             sta.config(pm=0xa11140)
             log("WiFi Power Management: High Performance Set")
         except:
             pass
-        
+
         sta.disconnect()
         time.sleep_ms(200)
         sta.connect(ssid, pwd)
 
         t0 = time.ticks_ms()
+        last_log = t0  # used to log once per second
+
         while time.ticks_diff(time.ticks_ms(), t0) < timeout_sec * 1000:
             status = sta.status()
-            
-            # Log status roughly once per second
-            if time.ticks_diff(time.ticks_ms(), t0) % 1000 < 250:
+
+            # Log status once per second (stable, no modulo spam)
+            now = time.ticks_ms()
+            if time.ticks_diff(now, last_log) >= 1000:
+                last_log = now
                 log("WiFi Status: {}".format(status))
-            
+
             if sta.isconnected():
                 log("WiFi Connected! IP: " + sta.ifconfig()[0])
                 return True
-            
+
             # Catch known failure states
-            if status < 0 or status == 201: 
+            if status < 0 or status == 201:
                 log("WiFi Error: Auth/Hardware Failure ({})".format(status))
                 break
-                
+
             time.sleep_ms(250)
-        
+
         log("Attempt {} timed out.".format(attempt))
         time.sleep_ms(1000)
 
     return False
+
 
 def gh_contents_url(path):
     return API_BASE + path.lstrip("/") + "?ref=" + GITHUB_BRANCH
@@ -259,11 +277,15 @@ def _safe_swap(target):
     except: pass
  
 
-def perform_update(vers_data, lcd, force=False):
+def perform_update(vers_data, lcd):
     # We only skip user-specific credentials and the version tracker
     SKIP = ("github_token.py", "config.py", "local_version.txt")
     
-    remote_v = (vers_data.get("version") or "0.0.0").strip()
+    remote_v = (vers_data.get("version") or "").strip()
+    if not remote_v:
+        log("versions.json missing 'version' - aborting update")
+        return False
+
     
     files = vers_data.get("files", [])
     work = []
@@ -300,12 +322,17 @@ def perform_update(vers_data, lcd, force=False):
     log("REBOOTING NOW")
     if lcd:
         draw_bottom_status(lcd, "Rebooting", show_id=True)
+        
+    time.sleep(2)
     
-    time.sleep(2) # IMPORTANT: Let the file system finish writing
-    
-    machine.WDT(timeout=10) 
-    while True: pass
-    
+    # Always hard reboot after an update (ignores no_reset.flag)
+    gc.collect()
+    log("Hard reboot (WDT) after update")
+    machine.WDT(timeout=10000)
+    while True:
+        pass
+
+
 
 def run_app_main(lcd=None):
     gc.collect()
@@ -318,7 +345,8 @@ def run_app_main(lcd=None):
     except Exception as e:
         print("APP CRASH:", e)
         time.sleep(2)
-        machine.reset()
+        guarded_reset("app_main crash")
+
 
 def apply_staged_bootloader_if_present():
     # Check if a new version of the bootloader was downloaded
@@ -328,15 +356,20 @@ def apply_staged_bootloader_if_present():
             # Delete the old backup if it exists
             try: os.remove("bootloader.py.old")
             except: pass
-            
+
             # Rename current to old, and new to current
             os.rename("bootloader.py", "bootloader.py.old")
             os.rename("bootloader.py.new", "bootloader.py")
-            
-            log("Bootloader updated. Restarting...")
-            machine.reset() # Restart to run the new code
+
+            log("Bootloader updated. Hard rebooting...")
+            time.sleep_ms(200)
+            machine.WDT(timeout=10000)
+            while True:
+                pass
+
         except Exception as e:
             log("Bootloader swap failed: {}".format(e))
+
         
 def draw_bottom_status(lcd, status_msg, show_id=None):
     if lcd is None: return
@@ -401,7 +434,6 @@ def main():
     # 4. Handle Setup Mode (If no config, clear logo and show setup)
     if not config_exists:
         log("Entering Setup Mode...")
-        from writer import CWriter
         import config_font
         
         ap = network.WLAN(network.AP_IF)
@@ -461,20 +493,37 @@ def main():
     
     if vers_data:
         if vers_data.get("remote_command") == "reboot":
-            machine.reset()
-            
-        remote_v = (vers_data.get("version") or "0.0.0").strip()
+            guarded_reset("remote_command reboot")
+                
+        remote_v = (vers_data.get("version") or "").strip()
+        if not remote_v:
+            log("versions.json missing 'version' - skipping update check")
+            run_app_main(lcd)
+            return
+        
         local_v = "0.0.0"
         try:
-            with open(LOCAL_VERSION_FILE, "r") as f: local_v = f.read().strip()
-        except: pass
+            with open(LOCAL_VERSION_FILE, "r") as f:
+                local_v = f.read().strip()
+        
+        except:
+            pass
+        
+        if vers_data.get("force_update") or (local_v != remote_v):
+            ok = perform_update(vers_data, lcd)
+            if not ok:
+                log("Update failed - continuing with existing firmware")
+                run_app_main(lcd)
+                return
+            return
 
-        if (local_v != remote_v) or vers_data.get("force_update"):
-            perform_update(vers_data, lcd, force=True)
-            return 
-    
+
+        
     # 8. Success - Run App
     run_app_main(lcd)
 
+
 if __name__ == "__main__":
     main()
+
+
