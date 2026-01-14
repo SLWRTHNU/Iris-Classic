@@ -314,59 +314,68 @@ def _safe_swap(target):
  
 
 def perform_update(vers_data, lcd):
-    # We only skip user-specific credentials and the version tracker
     SKIP = ("github_token.py", "config.py", "local_version.txt")
-    
+
     remote_v = (vers_data.get("version") or "").strip()
     if not remote_v:
         log("versions.json missing 'version' - aborting update")
         return False
 
-    
     files = vers_data.get("files", [])
     work = []
     for f in files:
         p = f.get("path")
         t = f.get("target") or p.split("/")[-1]
-        if t not in SKIP: 
+        if t not in SKIP:
             work.append((p, t))
 
-    if not work: return True
+    if not work:
+        return True
 
     # 1. DOWNLOAD
     for idx, (p, t) in enumerate(work, start=1):
         pct = int((idx * 100) / len(work))
         log("Downloading: {} ({}%)".format(t, pct))
-        if lcd: draw_bottom_status(lcd, "Updating {}%".format(pct), show_id=True)
-        if not gh_download_to_file(p, t + ".new"): return False
+        if lcd:
+            draw_bottom_status(lcd, "Updating {}%".format(pct), show_id=True)
+        if not gh_download_to_file(p, t + ".new"):
+            return False
         gc.collect()
 
     # 2. COMMIT
     log("Swapping files...")
-    if lcd: draw_bottom_status(lcd, "Saving", show_id=True)
-    for p, t in work: 
+    if lcd:
+        draw_bottom_status(lcd, "Saving", show_id=True)
+
+    for p, t in work:
         _safe_swap(t)
 
-    with open(LOCAL_VERSION_FILE, "w") as f: f.write(remote_v)
-    
-    try:
-        import os
-        os.sync() 
-    except: pass
-    
-    # 3. THE HARD RESET (The most important part)
+    # Write local version AFTER all swaps
+    with open(LOCAL_VERSION_FILE, "w") as f:
+        f.write(remote_v)
+        try:
+            f.flush()
+        except:
+            pass
+
+    # 3. REBOOT
     log("REBOOTING NOW")
     if lcd:
         draw_bottom_status(lcd, "Rebooting", show_id=True)
-        
-    time.sleep(2)
-    
-    # Always hard reboot after an update (ignores no_reset.flag)
-    gc.collect()
-    log("Hard reboot (WDT) after update")
-    machine.WDT(timeout=10000)
-    while True:
-        pass
+
+    time.sleep_ms(300)
+
+    try:
+        gc.collect()
+        log("Hard reboot (WDT) after update")
+        machine.WDT(timeout=2000)  # 2 seconds
+        while True:
+            time.sleep_ms(100)
+    except Exception as e:
+        log("WDT failed: {}".format(e))
+        time.sleep_ms(200)
+        machine.reset()
+
 
 
 
@@ -563,5 +572,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
