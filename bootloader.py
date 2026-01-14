@@ -75,57 +75,56 @@ STATUS_X    = 3
 
 # ---------- LCD Logic (ORDERED CORRECTLY) ----------
 
+# Use the driver variables for maximum compatibility
+import Pico_LCD_2_8 as drv
+
+# 1. Update your pin constants at the top
+LCD_BL_PIN = 13
+LCD_RST_PIN = 15
+
 def _lcd_backlight_on():
-    try:
-        import Pico_LCD_2_8 as drv
-        from machine import Pin, PWM
-        # Try PWM first for smooth brightness
-        bl_pin = Pin(drv.BL, Pin.OUT)
-        pwm = PWM(bl_pin)
-        pwm.freq(1000)
-        pwm.duty_u16(65535) # 100% Brightness
-        log("Backlight: PWM ON")
-    except Exception as e:
-        # Fallback: Just turn the pin HIGH
-        try:
-            import Pico_LCD_2_8 as drv
-            from machine import Pin
-            Pin(drv.BL, Pin.OUT).value(1)
-            log("Backlight: PIN HIGH")
-        except:
-            log("Backlight: Failed to toggle")
+    from machine import Pin, PWM
+    bl = PWM(Pin(LCD_BL_PIN))
+    bl.freq(1000)
+    bl.duty_u16(65535) # Stable PWM as proven in shell
 
 def _lcd_hard_reset():
-    try:
-        import Pico_LCD_2_8 as drv
-        from machine import Pin
-        rst = Pin(drv.RST, Pin.OUT)
-        rst.value(1)
-        time.sleep_ms(20)
-        rst.value(0)
-        time.sleep_ms(100)
-        rst.value(1)
-        time.sleep_ms(200)
-        log("LCD Hardware Reset Complete")
-    except:
-        pass
+    from machine import Pin
+    rst = Pin(LCD_RST_PIN, Pin.OUT)
+    rst.value(1)
+    time.sleep_ms(50)
+    rst.value(0) 
+    time.sleep_ms(150)
+    rst.value(1)
+    time.sleep_ms(150) # Matching our successful shell timing
+
+# Place this at the top of your "LCD Logic" section
+_LCD_INSTANCE = None
 
 def init_lcd():
+    global _LCD_INSTANCE
+    
+    # If already initialized, just return it
+    if _LCD_INSTANCE is not None:
+        return _LCD_INSTANCE
+
     if LCD_Driver is None: 
-        log("Driver not found")
         return None
+    
     try:
-        # These are now defined ABOVE this function
+        log("Performing Hard Reset and Driver Init...")
         _lcd_hard_reset()
-        lcd = LCD_Driver()
         
-        # Point to the correct method we found earlier
+        lcd = LCD_Driver()
         lcd.display_update = lcd.show
-            
         lcd.fill(BLACK)
         lcd.display_update()
         _lcd_backlight_on()
-        return lcd
+        
+        # Save to global so we never reset again this session
+        _LCD_INSTANCE = lcd
+        return _LCD_INSTANCE
+        
     except Exception as e:
         log("LCD Init Error: {}".format(e))
         return None
@@ -153,7 +152,7 @@ def connect_wifi(lcd, ssid, pwd, timeout_sec=15, retries=2):
 
     draw_bottom_status(lcd, "Connecting")
     
-    # 1. Ensure Access Point is fully OFF
+    # Ensure Access Point is fully OFF
     ap = network.WLAN(network.AP_IF)
     if ap.active():
         ap.active(False)
@@ -168,35 +167,40 @@ def connect_wifi(lcd, ssid, pwd, timeout_sec=15, retries=2):
     for attempt in range(1, retries + 1):
         log("WiFi Attempt {}/{}".format(attempt, retries))
         
-        # 2. Hard reset the STA interface for a clean slate
+        # Hard reset the STA interface for a clean slate
         sta.active(False)
         time.sleep_ms(500)
         sta.active(True)
         
-        # 3. Explicitly disconnect before starting a new handshake
+        # CRITICAL: Re-apply PM fix for Pico 2 W stability
+        try:
+            sta.config(pm=0xa11140)
+            log("WiFi Power Management: High Performance Set")
+        except:
+            pass
+        
         sta.disconnect()
         time.sleep_ms(200)
-        
         sta.connect(ssid, pwd)
 
         t0 = time.ticks_ms()
         while time.ticks_diff(time.ticks_ms(), t0) < timeout_sec * 1000:
             status = sta.status()
             
-            # 0=Idle, 1=Connecting, 2=No Route, 3=Connected, -1=Fail, -2=Bad Password
-            if utime.ticks_ms() % 1000 < 100: # Log once per second
+            # Log status roughly once per second
+            if time.ticks_diff(time.ticks_ms(), t0) % 1000 < 250:
                 log("WiFi Status: {}".format(status))
             
-            # 4. Check for success
             if sta.isconnected():
                 log("WiFi Connected! IP: " + sta.ifconfig()[0])
                 return True
             
+            # Catch known failure states
             if status < 0 or status == 201: 
-                log("WiFi Error: Bad Auth/Failure ({})".format(status))
+                log("WiFi Error: Auth/Hardware Failure ({})".format(status))
                 break
                 
-            utime.sleep_ms(250)
+            time.sleep_ms(250)
         
         log("Attempt {} timed out.".format(attempt))
         time.sleep_ms(1000)
@@ -380,25 +384,13 @@ def main():
     # 1. Hardware Stability Delay
     time.sleep_ms(500) 
     
-    # 2. Start the LCD and show the logo immediately
+    # 2. START THE LCD ONCE (The only blink happens here)
     lcd = init_lcd()
-    if lcd:
-        draw_boot_logo(lcd)
-    
-    # 3. Handle Bootloader Updates FIRST
-    # If this finds a new file, it will reboot the Pico immediately
-    apply_staged_bootloader_if_present()
-    
-    # 4. Heartbeat LED
-    try:
-        led = machine.Pin("LED", machine.Pin.OUT)
-        led.on()
-    except:
-        pass
+    if not lcd:
+        log("LCD critical failure")
+        return
 
-    log("BOOTLOADER: Starting...")
-    
-    # 5. Check for WiFi config
+    # 3. Check for WiFi config
     config_exists = False
     try:
         os.stat("config.py")
@@ -406,24 +398,20 @@ def main():
     except OSError:
         config_exists = False
 
-    # 3. Handle Setup Mode FIRST (No Logo)
+    # 4. Handle Setup Mode (If no config, clear logo and show setup)
     if not config_exists:
-        lcd = init_lcd() # Start LCD but don't draw logo
-        if not lcd: return
-
+        log("Entering Setup Mode...")
         from writer import CWriter
         import config_font
         
-        log("Entering Setup Mode (Skipping Logo)...")
         ap = network.WLAN(network.AP_IF)
         ap.active(True)
         ap.config(essid="Iris Classic", security=0)
         ip = "192.168.4.1"
 
-        # Initialize Setup UI
         w_setup = CWriter(lcd, config_font, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
         w_setup.set_spacing(2) 
-        lcd.fill(BLACK)
+        lcd.fill(BLACK) # Clear screen for setup text
 
         def print_safe(text, y, x_val, color):
             tw = w_setup.stringlen(text)
@@ -432,7 +420,6 @@ def main():
             w_setup.set_textpos(lcd, y, final_x)
             w_setup.printstring(text)
 
-        # Draw Setup Screen
         print_safe("Iris Setup", 20, -1, YELLOW) 
         print_safe("1) Connect to WiFi:", 80, 60, WHITE)
         print_safe("Iris Classic", 110, 90, YELLOW) 
@@ -440,16 +427,15 @@ def main():
         print_safe("{}".format(ip), 190, 90, YELLOW) 
         
         lcd.show()
-        
         import setup_server
         setup_server.run()
         return
 
-    # 4. NORMAL FLOW (Logo only shows if config exists)
-    lcd = init_lcd()
-    if lcd:
-        draw_boot_logo(lcd)
+    # 5. NORMAL FLOW (Config exists)
+    # The logo is drawn ONCE and stays there
+    draw_boot_logo(lcd)
     
+    # Handle staged updates
     apply_staged_bootloader_if_present()
     
     try:
@@ -459,23 +445,17 @@ def main():
 
     log("BOOTLOADER: Starting Normal Boot...")
 
-    # 5. Normal Boot WiFi Connection
+    # 6. WiFi Connection (Writes status over logo)
     ssid, pwd = load_config_wifi()
     if not ssid or not connect_wifi(lcd, ssid, pwd):
         log("WiFi Failed.")
         if lcd:
-            lcd.fill(0x0000) # BLACK 
-            lcd.text("WIFI FAILED", 40, 15, 0xFC00) # RED
-            lcd.text("1. Power cycle", 10, 40, 0xFFFF)
-            lcd.text("   your Iris", 10, 50, 0xFFFF)
-            lcd.text("2. Power cycle", 10, 70, 0xFFFF)
-            lcd.text("   your router", 10, 80, 0xFFFF)
-            lcd.text("3. Factory Reset", 10, 100, 0xFFFF)
-            lcd.text("   to reconfigure", 10, 110, 0xFFFF)
+            lcd.fill(0x0000)
+            lcd.text("WIFI FAILED", 40, 15, 0xFC00)
             lcd.show()
         return
 
-    # 8. Check for Updates
+    # 7. Check for Updates
     log("Checking for updates...")
     vers_data = fetch_versions_json(lcd)
     
@@ -493,7 +473,7 @@ def main():
             perform_update(vers_data, lcd, force=True)
             return 
     
-    # 9. Success - Run App
+    # 8. Success - Run App
     run_app_main(lcd)
 
 if __name__ == "__main__":
