@@ -43,6 +43,15 @@ DEVICE_ID_FILE     = "device_id.txt"
 
 CURRENT_BRIGHTNESS = 100
 
+def _clamp(n, lo, hi):
+    return lo if n < lo else (hi if n > hi else n)
+
+def _wifi_progress_pct(start_ms, timeout_sec):
+    elapsed_ms = time.ticks_diff(time.ticks_ms(), start_ms)
+    pct = int((elapsed_ms * 100) // (timeout_sec * 1000))
+    return _clamp(pct, 0, 99)  # keep 99 until actually connected
+
+
 def _get_token():
     try:
         import github_token
@@ -203,27 +212,35 @@ def connect_wifi(lcd, ssid, pwd, timeout_sec=15, retries=2):
         sta.connect(ssid, pwd)
 
         t0 = time.ticks_ms()
-        last_log = t0  # used to log once per second
-
+        last_ui = t0  # UI update once per second
+        
         while time.ticks_diff(time.ticks_ms(), t0) < timeout_sec * 1000:
             status = sta.status()
-
-            # Log status once per second (stable, no modulo spam)
+            
             now = time.ticks_ms()
-            if time.ticks_diff(now, last_log) >= 1000:
-                last_log = now
-                log("WiFi Status: {}".format(status))
-
+            if time.ticks_diff(now, last_ui) >= 1000:
+                last_ui = now
+                
+                pct = _wifi_progress_pct(t0, timeout_sec)
+                if lcd:
+                    draw_bottom_status(lcd, "Connecting {}%".format(pct), show_id=True)
+                
+                log("WiFi Status: {} ({}%)".format(status, pct))
+                
             if sta.isconnected():
+                if lcd:
+                    draw_bottom_status(lcd, "Connected 100%", show_id=True)
                 log("WiFi Connected! IP: " + sta.ifconfig()[0])
                 return True
-
-            # Catch known failure states
+            
             if status < 0 or status == 201:
+                if lcd:
+                    draw_bottom_status(lcd, "ERR: WiFi {}".format(status), show_id=True)
                 log("WiFi Error: Auth/Hardware Failure ({})".format(status))
                 break
-
+            
             time.sleep_ms(250)
+
 
         log("Attempt {} timed out.".format(attempt))
         time.sleep_ms(1000)
@@ -570,6 +587,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
