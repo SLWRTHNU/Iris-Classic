@@ -46,9 +46,14 @@ CURRENT_BRIGHTNESS = 100
 def _get_token():
     try:
         import github_token
-        return getattr(github_token, "GITHUB_TOKEN", "")
+        t = getattr(github_token, "GITHUB_TOKEN", "")
+        if t:
+            t = t.strip()
+        return t
     except:
         return ""
+
+
 
 def gh_api_headers_raw():
     h = {
@@ -59,6 +64,7 @@ def gh_api_headers_raw():
     token = _get_token()
     if token:
         h["Authorization"] = "Bearer " + token
+
     return h
 
 # ---------- Display driver ----------
@@ -229,15 +235,45 @@ def gh_contents_url(path):
     return API_BASE + path.lstrip("/") + "?ref=" + GITHUB_BRANCH
 
 def fetch_versions_json(lcd):
-    url = gh_contents_url(VERSIONS_PATH)
+    # Cache-bust so GitHub/CDNs don’t serve an older copy
+    url = gh_contents_url(VERSIONS_PATH) + "&nocache={}".format(time.ticks_ms())
+
     r = None
     try:
         r = requests.get(url, headers=gh_api_headers_raw())
-        if r.status_code != 200: return None
-        return json.loads(r.text)
-    except: return None
+        log("versions.json HTTP: {}".format(r.status_code))
+
+        if r.status_code != 200:
+            # Often this is 403 rate limit or 404 path issues
+            try:
+                log("versions.json body (start): {}".format(r.text[:200]))
+            except:
+                pass
+            return None
+
+        try:
+            data = json.loads(r.text)
+        except Exception as e:
+            log("versions.json JSON parse failed: {}".format(e))
+            try:
+                log("versions.json raw (start): {}".format(r.text[:200]))
+            except:
+                pass
+            return None
+
+        # Helpful confirmation log
+        rv = (data.get("version") or "").strip()
+        log("versions.json parsed OK. remote version='{}'".format(rv))
+        return data
+
+    except Exception as e:
+        log("versions.json fetch error: {}".format(e))
+        return None
     finally:
-        if r: r.close()
+        if r:
+            try: r.close()
+            except: pass
+
 
 def gh_download_to_file(path, out_path):
     url = gh_contents_url(path)
@@ -502,6 +538,8 @@ def main():
             return
         
         local_v = "0.0.0"
+        log("Version check: local='{}' remote='{}' force_update={}".format(local_v, remote_v, vers_data.get("force_update")))
+
         try:
             with open(LOCAL_VERSION_FILE, "r") as f:
                 local_v = f.read().strip()
