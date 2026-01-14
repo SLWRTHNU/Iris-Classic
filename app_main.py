@@ -69,6 +69,13 @@ WHITE  = 0xFFFF
 RED    = 0xF800  # Updated
 YELLOW = 0xFFE0  # Updated
 GREEN  = 0x07E0  # Updated
+LOGO_W = 320
+LOGO_H = 240
+TEXT_HEIGHT = 11
+BAR_HEIGHT  = 12
+Y_POS       = 229
+STATUS_X    = 3
+DEVICE_ID_FILE     = "device_id.txt"
 
 # --- Global Heart State ---
 hb_state = True
@@ -211,26 +218,23 @@ def now_unix_s():
     return t + UNIX_2000_OFFSET if t < 1200000000 else t
 
 def draw_bottom_status(lcd, status_msg, show_id=None):
-    if lcd is None: return
-    # Show ID if connecting or if an error starts with ERR
-    if show_id is None:
-        show_id = any(status_msg.startswith(x) for x in ["Connecting", "Connected", "ERR:"])
+    if lcd is None:
+        return
 
-    # Draw status bar at the bottom
+    if show_id is None:
+        show_id = status_msg.startswith("Loading")
+
     lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
     lcd.text(status_msg, STATUS_X, Y_POS, BLACK)
 
     if show_id:
-        device_id = "N/A"
-        try:
-            if DEVICE_ID_FILE in os.listdir():
-                with open(DEVICE_ID_FILE, "r") as f:
-                    device_id = f.read().strip()
-        except: pass
+        device_id = get_device_id()
         id_text = "ID:{}".format(device_id)
         id_x = lcd.width - (len(id_text) * 8) - 3
         lcd.text(id_text, id_x, Y_POS, BLACK)
+
     lcd.show()
+
 
 def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon, last, hb_state, heart_only=False): 
     W, H = lcd.width, lcd.height # 320, 240
@@ -266,11 +270,9 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
 
     # --- LOADING STATE ---
     if not last:
-        device_id = get_device_id()
-        id_text = "ID:{}".format(device_id)
         draw_bottom_status(lcd, "Loading", show_id=True)
-        lcd.show()
-        return         
+        return
+        
 
     # --- FULL DATA STATE DRAW ---
     lcd.fill(BLACK)
