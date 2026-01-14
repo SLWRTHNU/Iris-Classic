@@ -140,7 +140,12 @@ def fetch_ns_entries():
     return None
 
 def mgdl_to_units(val_mgdl: float) -> float:
-    if str(DISPLAY_UNITS).lower() == "mgdl": return float(val_mgdl)
+    try:
+        if str(DISPLAY_UNITS).lower() == "mgdl": 
+            return float(val_mgdl)
+        return round(float(val_mgdl) / 18.0, 1) # Convert to mmol
+    except:
+        return 0.0
 
 def direction_to_arrow(direction: str) -> str:
     return {
@@ -162,20 +167,21 @@ def parse_entries(data):
         
     cur = data[0]
     cur_mgdl = cur.get("sgv")
+    # Nightscout sometimes uses "date" or "mills"
     cur_time_ms = int(cur.get("mills", cur.get("date", 0)))
     
-    if cur_mgdl is None or cur_time_ms == 0: 
+    if cur_mgdl is None: 
         return None
     
     delta_units = None
-    if len(data) > 1 and "sgv" in data[1]:
+    if len(data) > 1:
         prev_mgdl = data[1].get("sgv")
         if prev_mgdl is not None:
-            delta_mgdl = float(cur_mgdl) - float(prev_mgdl)
+            diff = float(cur_mgdl) - float(prev_mgdl)
             if str(DISPLAY_UNITS).lower() == "mgdl":
-                delta_units = delta_mgdl
+                delta_units = diff
             else:
-                delta_units = round(delta_mgdl / 18.0, 1)
+                delta_units = diff / 18.0
         
     return {
         "bg": mgdl_to_units(cur_mgdl),
@@ -187,8 +193,13 @@ def parse_entries(data):
 
 
 def fmt_bg(bg_val) -> str:
-    return str(int(round(bg_val))) if str(DISPLAY_UNITS).lower() == "mgdl" else "{:.1f}".format(bg_val)
-
+    if bg_val is None: return "---" # Safety check
+    try:
+        if str(DISPLAY_UNITS).lower() == "mgdl":
+            return str(int(round(bg_val)))
+        return "{:.1f}".format(float(bg_val))
+    except:
+        return "ERR"
         
 def fmt_delta(delta_val) -> str:
     if delta_val is None: return ""
@@ -220,7 +231,7 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
         # Erase just the heart area
         lcd.fill_rect(x_heart, y_heart, heart_w, heart_h, BLACK)
         if hb_state:
-            w_heart.setcolor(BLACK, RED)
+            w_heart.setcolor(RED, BLACK)
             w_heart.set_textpos(lcd, y_heart, x_heart)
             w_heart.printstring("T")
         
@@ -233,12 +244,12 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
 
     # --- LOADING STATE ---
     if not last:
-        BAR_HEIGHT = 11
-        Y_POS = 128 - BAR_HEIGHT + 1
+        BAR_HEIGHT = 12
+        Y_POS =  229 - BAR_HEIGHT
         STATUS_X = 3
         device_id = get_device_id()
         id_text = "ID:{}".format(device_id)
-        lcd.fill_rect(0, Y_POS, lcd.width, BAR_HEIGHT, WHITE)
+        lcd.fill_rect(0, Y_POS - 1, lcd.width, BAR_HEIGHT, WHITE)
         lcd.text("Loading", STATUS_X, Y_POS, BLACK)
         id_x = lcd.width - (len(id_text) * 8) - 3
         lcd.text(id_text, id_x, Y_POS, BLACK)
@@ -298,24 +309,24 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
     heart_age_gap = 6
     age_w = w_age_small.stringlen(age_text)
     x_age = x_heart - age_w - heart_age_gap
-    w_age_small.setcolor(BLACK, age_color)
+    w_age_small.setcolor(age_color, BLACK)
     w_age_small.set_textpos(lcd, y_age, x_age)
     w_age_small.printstring(age_text)
 
     # Draw Heart (Full Draw Phase)
     if hb_state:
-        w_heart.setcolor(BLACK, RED)
+        w_heart.setcolor(RED, BLACK)
         w_heart.set_textpos(lcd, y_heart, x_heart)
         w_heart.printstring("T")
 
     # Draw BG
-    w_big.setcolor(BLACK, bg_color)
+    w_big.setcolor(bg_color, BLACK)
     x_bg = (W - w_big.stringlen(bg_text)) // 2
     w_big.set_textpos(lcd, y_bg, x_bg)
     w_big.printstring(bg_text)
 
     # Draw Trend Arrow
-    w_arrow.setcolor(BLACK, arrow_color)
+    w_arrow.setcolor(arrow_color, BLACK)
     w_arrow.set_textpos(lcd, y_arrow, 10) 
     w_arrow.printstring(arrow_text)
 
@@ -327,8 +338,8 @@ def draw_screen(lcd, w_small, w_age_small, w_big, w_arrow, w_heart, w_delta_icon
         gap = 5          
         v_offset = -5
         
-        w_small.setcolor(BLACK, WHITE)
-        w_delta_icon.setcolor(BLACK, WHITE)
+        w_small.setcolor(WHITE, BLACK)
+        w_delta_icon.setcolor(WHITE, BLACK)
         
         h_small = font_small.height()
         h_delta = font_delta.height()
@@ -376,7 +387,7 @@ def main(lcd=None):
         ntp_sync()
     
     # --- UPDATED TIMING INTERVALS ---
-    GLUCOSE_INTERVAL = 15000    # 15 seconds
+    GLUCOSE_INTERVAL = 5000    # 15 seconds
     CONTROL_INTERVAL = 300000   # 5 minutes (Corrected)
     
     next_glucose = utime.ticks_ms() + 1000
@@ -437,3 +448,4 @@ if __name__ == "__main__":
         print("CRITICAL CRASH:", e)
         utime.sleep(5)
         reset()
+
