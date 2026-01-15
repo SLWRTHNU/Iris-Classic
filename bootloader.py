@@ -109,12 +109,21 @@ import Pico_LCD_2_8 as drv
 # 1. Update your pin constants at the top
 LCD_BL_PIN = 13
 LCD_RST_PIN = 15
+_BL_PWM = None
 
-def _lcd_backlight_on():
+
+_BL_PWM = None
+
+def _lcd_backlight_on(duty_u16=65535):
+    global _BL_PWM
     from machine import Pin, PWM
-    bl = PWM(Pin(LCD_BL_PIN))
-    bl.freq(1000)
-    bl.duty_u16(65535) # Stable PWM as proven in shell
+
+    if _BL_PWM is None:
+        _BL_PWM = PWM(Pin(LCD_BL_PIN))
+        _BL_PWM.freq(1000)
+
+    _BL_PWM.duty_u16(duty_u16)
+
 
 def _lcd_hard_reset():
     from machine import Pin
@@ -147,7 +156,8 @@ def init_lcd():
         lcd.display_update = lcd.show
         lcd.fill(BLACK)
         lcd.display_update()
-        _lcd_backlight_on()
+        _lcd_backlight_on()  # now safe, PWM is persistent
+
         
         # Save to global so we never reset again this session
         _LCD_INSTANCE = lcd
@@ -431,26 +441,27 @@ def run_app_main(lcd=None):
 
 
 def apply_staged_bootloader_if_present():
-    # Check if a new version of the bootloader was downloaded
     if "bootloader.py.new" in os.listdir():
         try:
             log("Applying new bootloader...")
-            # Delete the old backup if it exists
+
             try: os.remove("bootloader.py.old")
             except: pass
 
-            # Rename current to old, and new to current
             os.rename("bootloader.py", "bootloader.py.old")
             os.rename("bootloader.py.new", "bootloader.py")
 
-            log("Bootloader updated. Hard rebooting...")
-            time.sleep_ms(200)
-            machine.WDT(timeout=10000)
-            while True:
+            log("Bootloader updated. Rebooting...")
+            try:
+                os.sync()
+            except:
                 pass
+            time.sleep_ms(200)
+            machine.reset()
 
         except Exception as e:
             log("Bootloader swap failed: {}".format(e))
+
 
         
 def draw_bottom_status(lcd, status_msg, show_id=None):
@@ -548,10 +559,10 @@ def show_wifi_failed(lcd):
 
 # ---------- Runner ----------
 def main():
-    # 1. Hardware Stability Delay
-    time.sleep_ms(500) 
-    
-    # 2. START THE LCD ONCE (The only blink happens here)
+    time.sleep_ms(500)
+
+    apply_staged_bootloader_if_present()
+
     lcd = init_lcd()
     if not lcd:
         log("LCD critical failure")
@@ -657,4 +668,9 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+
+
 
