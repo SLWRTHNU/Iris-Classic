@@ -243,6 +243,13 @@ def run_app_main(lcd):
 # ---------- 4. MAIN RUNNER ----------
 
 def main():
+    # Force WiFi off at start to stabilize power for the LCD/Boot
+    try:
+        network.WLAN(network.STA_IF).active(False)
+    except:
+        pass
+
+    # Now proceed with update checks
     apply_staged_bootloader_if_present()
     time.sleep_ms(500)
     
