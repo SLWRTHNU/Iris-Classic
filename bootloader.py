@@ -407,14 +407,11 @@ def perform_update(vers_data, lcd):
 
     gc.collect()
     try:
-        os.sync() 
+        os.sync()
     except:
         pass
 
-    # Wait for flash hardware to finish internal housekeeping
-    time.sleep_ms(1000) 
-    
-    log("REBOOTING NOW")
+    time.sleep_ms(1500)
     machine.reset()
 
 
@@ -436,24 +433,24 @@ def run_app_main(lcd=None):
 def apply_staged_bootloader_if_present():
     if "bootloader.py.new" in os.listdir():
         try:
-            log("Applying new bootloader...")
+            # We haven't logged to LCD yet, so use serial log
+            print("[BOOTLOADER] Applying staged update...")
+            
             try: os.remove("bootloader.py.old")
             except: pass
 
             os.rename("bootloader.py", "bootloader.py.old")
             os.rename("bootloader.py.new", "bootloader.py")
 
-            log("Bootloader updated. Committing to flash...")
-            try:
-                os.sync() # CRITICAL: Ensure the rename is saved to hardware
-            except:
-                pass
+            # Force flash commit
+            try: os.sync()
+            except: pass
             
-            time.sleep_ms(500) # Give the flash controller a moment
-            machine.reset()    # Clean hardware restart
-
+            print("[BOOTLOADER] Swap complete. Rebooting to new version.")
+            time.sleep_ms(500)
+            machine.reset() # This starts the NEW bootloader code
         except Exception as e:
-            log("Bootloader swap failed: {}".format(e))
+            print("[BOOTLOADER] Swap failed:", e)
 
         
 def draw_bottom_status(lcd, status_msg, show_id=None):
@@ -551,10 +548,14 @@ def show_wifi_failed(lcd):
 
 # ---------- Runner ----------
 def main():
-    # 1. Hardware Stability Delay
+    # 1. APPLY UPDATES FIRST (Before LCD/WiFi)
+    # If a new bootloader is waiting, swap it and reboot immediately
+    apply_staged_bootloader_if_present()
+
+    # 2. Hardware Stability Delay
     time.sleep_ms(500) 
     
-    # 2. START THE LCD ONCE (The only blink happens here)
+    # 3. START THE LCD
     lcd = init_lcd()
     if not lcd:
         log("LCD critical failure")
@@ -660,6 +661,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
