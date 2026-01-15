@@ -109,21 +109,12 @@ import Pico_LCD_2_8 as drv
 # 1. Update your pin constants at the top
 LCD_BL_PIN = 13
 LCD_RST_PIN = 15
-_BL_PWM = None
 
-
-_BL_PWM = None
-
-def _lcd_backlight_on(duty_u16=65535):
-    global _BL_PWM
+def _lcd_backlight_on():
     from machine import Pin, PWM
-
-    if _BL_PWM is None:
-        _BL_PWM = PWM(Pin(LCD_BL_PIN))
-        _BL_PWM.freq(1000)
-
-    _BL_PWM.duty_u16(duty_u16)
-
+    bl = PWM(Pin(LCD_BL_PIN))
+    bl.freq(1000)
+    bl.duty_u16(65535) # Stable PWM as proven in shell
 
 def _lcd_hard_reset():
     from machine import Pin
@@ -156,8 +147,7 @@ def init_lcd():
         lcd.display_update = lcd.show
         lcd.fill(BLACK)
         lcd.display_update()
-        _lcd_backlight_on()  # now safe, PWM is persistent
-
+        _lcd_backlight_on()
         
         # Save to global so we never reset again this session
         _LCD_INSTANCE = lcd
@@ -413,15 +403,15 @@ def perform_update(vers_data, lcd):
     # 4) Reboot (give flash time to settle)
     log("REBOOTING NOW")
     if lcd:
-        draw_bottom_status(lcd, "Rebooting", show_id=True)
-
-    gc.collect()
+        draw_bottom_status(lcd, "Restarting...", show_id=True)
+    
+    # Cleanly shut down WiFi to prevent power spikes during reset
     try:
-        os.sync()
+        network.WLAN(network.STA_IF).active(False)
     except:
         pass
-
-    time.sleep_ms(1500)
+        
+    time.sleep_ms(500)
     machine.reset()
 
 
@@ -444,24 +434,23 @@ def apply_staged_bootloader_if_present():
     if "bootloader.py.new" in os.listdir():
         try:
             log("Applying new bootloader...")
-
             try: os.remove("bootloader.py.old")
             except: pass
 
             os.rename("bootloader.py", "bootloader.py.old")
             os.rename("bootloader.py.new", "bootloader.py")
 
-            log("Bootloader updated. Rebooting...")
-            try:
-                os.sync()
-            except:
-                pass
-            time.sleep_ms(200)
-            machine.reset()
+            log("Bootloader updated. Hard rebooting...")
+            # Ensure the rename is physically written to flash
+            try: os.sync()
+            except: pass
+            time.sleep_ms(500) 
+            
+            # Direct reset is more reliable than WDT loop on RP2350
+            machine.reset() 
 
         except Exception as e:
             log("Bootloader swap failed: {}".format(e))
-
 
         
 def draw_bottom_status(lcd, status_msg, show_id=None):
@@ -559,10 +548,10 @@ def show_wifi_failed(lcd):
 
 # ---------- Runner ----------
 def main():
-    time.sleep_ms(500)
-
-    apply_staged_bootloader_if_present()
-
+    # 1. Hardware Stability Delay
+    time.sleep_ms(500) 
+    
+    # 2. START THE LCD ONCE (The only blink happens here)
     lcd = init_lcd()
     if not lcd:
         log("LCD critical failure")
