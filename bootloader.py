@@ -407,11 +407,14 @@ def perform_update(vers_data, lcd):
 
     gc.collect()
     try:
-        os.sync()
+        os.sync() 
     except:
         pass
 
-    time.sleep_ms(1500)
+    # Wait for flash hardware to finish internal housekeeping
+    time.sleep_ms(1000) 
+    
+    log("REBOOTING NOW")
     machine.reset()
 
 
