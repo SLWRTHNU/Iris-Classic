@@ -6,6 +6,7 @@ import os
 import gc
 import ubinascii
 import machine
+import config_font
 from writer import CWriter
 
 def guarded_reset(reason=""):
@@ -471,6 +472,58 @@ def draw_boot_logo(lcd):
         
     lcd.show() 
     draw_bottom_status(lcd, "Connecting")
+    
+def show_wifi_failed(lcd):
+    # Uses your existing globals: BLACK, WHITE, RED, and CWriter import already in bootloader
+    import config_font
+    import config_font_title
+    from writer import CWriter
+
+    w_body  = CWriter(lcd, config_font, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+    w_title = CWriter(lcd, config_font_title, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+
+    w_body.set_spacing(2)
+    w_title.set_spacing(2)
+
+    lcd.fill(BLACK)
+
+    def center_title(text, y, color=RED):
+        tw = w_title.stringlen(text)
+        x = max(0, (lcd.width - tw) // 2)
+        w_title.setcolor(color, BLACK)
+        w_title.set_textpos(lcd, y, x)
+        w_title.printstring(text)
+
+    def body_line(text, y, x=10, color=WHITE):
+        w_body.setcolor(color, BLACK)
+        w_body.set_textpos(lcd, y, x)
+        w_body.printstring(text)
+
+    # Title (centered)
+    center_title("WiFi Failed", 20, RED)
+
+    # Body alignment based on BODY font
+    x_num = 45
+    num_prefix = "1) "
+    x_text = x_num + w_body.stringlen(num_prefix)
+
+    y = 65
+    line_gap = 30
+    wrap_gap = 20
+
+    body_line("1) Power cycle", y, x_num)
+    body_line("your Iris", y + wrap_gap, x_text)
+
+    y += line_gap * 2
+    body_line("2) Power cycle", y, x_num)
+    body_line("your router", y + wrap_gap, x_text)
+
+    y += line_gap * 2
+    body_line("3) Factory Reset", y, x_num)
+    body_line("to reconfigure", y + wrap_gap, x_text)
+
+    lcd.show()
+
 
 # ---------- Runner ----------
 def main():
@@ -494,7 +547,6 @@ def main():
     # 4. Handle Setup Mode (If no config, clear logo and show setup)
     if not config_exists:
         log("Entering Setup Mode...")
-        import config_font
         
         ap = network.WLAN(network.AP_IF)
         ap.active(True)
@@ -536,15 +588,12 @@ def main():
     except: pass
 
     log("BOOTLOADER: Starting Normal Boot...")
-
-    # 6. WiFi Connection (Writes status over logo)
+    
     ssid, pwd = load_config_wifi()
     if not ssid or not connect_wifi(lcd, ssid, pwd):
         log("WiFi Failed.")
         if lcd:
-            lcd.fill(0x0000)
-            lcd.text("WIFI FAILED", 40, 15, 0xFC00)
-            lcd.show()
+            show_wifi_failed(lcd)
         return
 
     # 7. Check for Updates
