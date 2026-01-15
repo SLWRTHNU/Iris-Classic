@@ -431,23 +431,23 @@ def run_app_main(lcd=None):
 
 
 def apply_staged_bootloader_if_present():
-    # Check if a new version of the bootloader was downloaded
     if "bootloader.py.new" in os.listdir():
         try:
             log("Applying new bootloader...")
-            # Delete the old backup if it exists
             try: os.remove("bootloader.py.old")
             except: pass
 
-            # Rename current to old, and new to current
             os.rename("bootloader.py", "bootloader.py.old")
             os.rename("bootloader.py.new", "bootloader.py")
 
-            log("Bootloader updated. Hard rebooting...")
-            time.sleep_ms(200)
-            machine.WDT(timeout=10000)
-            while True:
+            log("Bootloader updated. Committing to flash...")
+            try:
+                os.sync() # CRITICAL: Ensure the rename is saved to hardware
+            except:
                 pass
+            
+            time.sleep_ms(500) # Give the flash controller a moment
+            machine.reset()    # Clean hardware restart
 
         except Exception as e:
             log("Bootloader swap failed: {}".format(e))
@@ -657,6 +657,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
