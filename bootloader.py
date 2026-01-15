@@ -134,13 +134,22 @@ def perform_update(vers_data, lcd):
             _safe_swap(t)
         gc.collect()
 
+    log("Update complete. Saving version...")
     with open(LOCAL_VERSION_FILE, "w") as f:
         f.write(remote_v)
     
-    log("Update complete. Rebooting.")
-    try: os.sync()
-    except: pass
-    time.sleep_ms(1000)
+    # 1. Force the file system to write all data to physical flash
+    try:
+        os.sync()
+    except:
+        pass
+    
+    # 2. Short pause to allow power rails to stabilize
+    time.sleep_ms(500)
+    
+    log("REBOOTING...")
+    
+    # 3. Perform a clean hard reset
     machine.reset()
 
 # ---------- 3. WIFI & HARDWARE ----------
@@ -158,7 +167,7 @@ def connect_wifi(lcd, ssid, pwd):
     except: pass
     
     log("Connecting to WiFi: " + ssid)
-    draw_bottom_status(lcd, "Connecting WiFi...")
+    draw_bottom_status(lcd, "Connecting to WiFi: " + ssid)
     sta.connect(ssid, pwd)
     
     for _ in range(30): # 15 second timeout
