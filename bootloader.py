@@ -332,7 +332,9 @@ def _safe_swap(target):
  
 
 def perform_update(vers_data, lcd):
-    SKIP = ("github_token.py", "config.py", "local_version.txt")
+    # Never OTA update these
+    SKIP_ALWAYS = ("github_token.py", "config.py", "local_version.txt", "main.py")
+    STAGE_ONLY  = ("bootloader.py",)  # download as .new, do NOT swap here
 
     remote_v = (vers_data.get("version") or "").strip()
     if not remote_v:
@@ -340,59 +342,78 @@ def perform_update(vers_data, lcd):
         return False
 
     files = vers_data.get("files", [])
-    work = []
+    work_swap = []
+    work_stage = []
+
     for f in files:
         p = f.get("path")
         t = f.get("target") or p.split("/")[-1]
-        if t not in SKIP:
-            work.append((p, t))
+        if not p or not t:
+            continue
 
-    if not work:
+        if t in SKIP_ALWAYS:
+            continue
+
+        if t in STAGE_ONLY:
+            work_stage.append((p, t))
+        else:
+            work_swap.append((p, t))
+
+    # Nothing to do
+    if not work_swap and not work_stage:
         return True
 
-    # 1. DOWNLOAD
-    for idx, (p, t) in enumerate(work, start=1):
-        pct = int((idx * 100) / len(work))
+    total = len(work_swap) + len(work_stage)
+    done = 0
+
+    # 1) DOWNLOAD everything to .new
+    for p, t in (work_swap + work_stage):
+        done += 1
+        pct = int((done * 100) / total)
         log("Downloading: {} ({}%)".format(t, pct))
         if lcd:
             draw_bottom_status(lcd, "Updating {}%".format(pct), show_id=True)
+
         if not gh_download_to_file(p, t + ".new"):
+            log("Download failed: {}".format(t))
             return False
+
         gc.collect()
 
-    # 2. COMMIT
+    # 2) COMMIT swaps (excluding staged bootloader)
     log("Swapping files...")
     if lcd:
         draw_bottom_status(lcd, "Saving", show_id=True)
 
-    for p, t in work:
+    for p, t in work_swap:
         _safe_swap(t)
 
-    # Write local version AFTER all swaps
-    with open(LOCAL_VERSION_FILE, "w") as f:
-        f.write(remote_v)
+    # 3) Write local version at the end
+    try:
+        with open(LOCAL_VERSION_FILE, "w") as f:
+            f.write(remote_v)
         try:
-            f.flush()
+            os.sync()
         except:
             pass
+    except Exception as e:
+        log("Failed writing local_version: {}".format(e))
+        # Still reboot; files may already be swapped
 
-    # 3. REBOOT
+    # 4) Reboot (give flash time to settle)
     log("REBOOTING NOW")
     if lcd:
         draw_bottom_status(lcd, "Rebooting", show_id=True)
 
-    time.sleep_ms(300)
-
+    gc.collect()
     try:
-        gc.collect()
-        log("Hard reboot (WDT) after update")
-        machine.WDT(timeout=2000)  # 2 seconds
-        while True:
-            time.sleep_ms(100)
-    except Exception as e:
-        log("WDT failed: {}".format(e))
-        time.sleep_ms(200)
-        machine.reset()
+        os.sync()
+    except:
+        pass
+
+    time.sleep_ms(1500)
+    machine.reset()
+
 
 
 def run_app_main(lcd=None):
