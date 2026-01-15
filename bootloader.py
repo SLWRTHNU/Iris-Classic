@@ -91,14 +91,17 @@ def _safe_swap(target):
 def apply_staged_bootloader_if_present():
     if "bootloader.py.new" in os.listdir():
         try:
-            print("Applying staged bootloader update...")
+            print("Applying staged update...")
             _safe_swap("bootloader.py")
-            try: os.sync()
-            except: pass
-            time.sleep_ms(500)
+            
+            # CRITICAL: Wait for flash and sync
+            os.sync()
+            time.sleep_ms(1000) 
+            
+            # Hard Reset
             machine.reset()
         except Exception as e:
-            print("Bootloader swap failed:", e)
+            print("Swap failed:", e)
 
 def fetch_versions_json(lcd):
     url = API_BASE + VERSIONS_PATH + "?ref=" + GITHUB_BRANCH + "&nocache=" + str(time.ticks_ms())
