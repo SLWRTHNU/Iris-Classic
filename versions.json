@@ -3,7 +3,7 @@
   "version": "1.0.1",
   "remote_command": "none",
   "force_update": false,
-"files": [
+  "files": [
     { "path": "test.txt", "target": "test.txt" }
   ]
 }
