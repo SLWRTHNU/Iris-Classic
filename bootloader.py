@@ -63,9 +63,6 @@ BLUE   = 0x001F
 BLACK  = 0x0000
 WHITE  = 0xFFFF
 
-LOGO_FILE   = "logo.bin"
-LOGO_W = 480
-LOGO_H = 320
 BAR_HEIGHT  = 12
 Y_POS       = 307  # 320 - 13 (bottom of screen)
 STATUS_X    = 3
@@ -123,8 +120,7 @@ def init_lcd():
         # Initialize the driver (but it won't call lcd_init yet)
         lcd = LCD_Driver(fb=bytearray(480 * 320 * 2))
         
-        # DON'T call lcd_init() yet - we'll load the logo first
-        # Then draw_boot_logo() will call show() which will display it
+        # Buffer is already zeroed (black); draw_boot_screen() will show it.
         
         # Give the driver a moment
         utime.sleep_ms(200)
@@ -206,26 +202,12 @@ def draw_bottom_status(lcd, status_msg, show_id=None):
     else:
         lcd.show()
 
-def draw_boot_logo(lcd):
+def draw_boot_screen(lcd):
     if lcd is None:
         return
-
-    # Display is already initialized in __init__, no need to call lcd_init()
-
-    expected = LOGO_W * LOGO_H * 2  # 307200
-    try:
-        st = os.stat(LOGO_FILE)
-        if st[6] == expected:
-            with open(LOGO_FILE, "rb") as f:
-                f.readinto(lcd.buffer)
-        else:
-            lcd.fill(BLACK)
-    except Exception as e:
-        lcd.fill(BLACK)
-
-    gc.collect()
+    lcd.fill(BLACK)
     lcd.show()
-    draw_bottom_status(lcd, "Starting...")
+    draw_bottom_status(lcd, "Booting...")
 
 # ---------- WiFi ----------
 def load_config_wifi():
@@ -659,7 +641,7 @@ def main():
         if "config.py" not in os.listdir():
             # No config found - enter setup mode immediately
             lcd = init_lcd()
-            draw_boot_logo(lcd)  # This calls lcd.lcd_init()
+            draw_boot_screen(lcd)
             time.sleep_ms(1000)
             
             # Show setup instructions and start server
@@ -670,13 +652,13 @@ def main():
         # Error checking for config - assume missing and enter setup
         if lcd is None:
             lcd = init_lcd()
-        draw_boot_logo(lcd)
+        draw_boot_screen(lcd)
         run_setup_mode(lcd)
         return
     
     # Config exists - proceed with normal boot
     lcd = init_lcd()
-    draw_boot_logo(lcd)
+    draw_boot_screen(lcd)
     
     # Connect WiFi
     ssid, pwd = load_config_wifi()
