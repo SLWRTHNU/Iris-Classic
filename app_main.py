@@ -6,18 +6,9 @@ hb_state = True
 wdt = None
 factory_reset_exit_requested = False  # ADD THIS LINE
 
-# ESP32-S3: Buzzer disabled for initial testing
-# Uncomment when buzzer is wired to GPIO 17
-# BUZ = Pin(17, Pin.IN, Pin.PULL_UP)
-# utime.sleep_ms(10) 
-# BUZ.init(Pin.OUT, value=1)
-
-# Dummy BUZ for now (so code doesn't crash)
-class DummyPin:
-    def value(self, v=None): pass
-    def on(self): pass
-    def off(self): pass
-BUZ = DummyPin()
+BUZ = Pin(17, Pin.IN, Pin.PULL_UP)
+utime.sleep_ms(10)
+BUZ.init(Pin.OUT, value=1)  # Active-low: 1 = OFF
 
 import gc
 import network
@@ -86,25 +77,18 @@ power_change_until = 0
 POWER_CHANGE_COOLDOWN_MS = 2500
 
 
+_usb_adc = ADC(Pin(4), atten=ADC.ATTN_11DB)  # Voltage divider: USB 5V → ~1.6V
+
 def is_usb_connected():
-    """ESP32-S3: Always return True (assume USB powered for now)"""
-    # TODO: Implement proper USB detection if needed
-    return True
+    """Return True if USB 5V rail is present (> ~0.5V threshold)."""
+    return _usb_adc.read_u16() > 10000  # ~0.5V; USB present gives ~32000
 
 
 # Paste this anywhere above async_main() in app_main.py
 
 # Memory monitoring removed - not needed with 8MB RAM
 
-# ESP32-S3: Stop button disabled for initial testing  
-# Uncomment when button is wired to GPIO 2
-# BTN_STOP_PIN = 2
-# BTN_STOP = Pin(BTN_STOP_PIN, Pin.IN, Pin.PULL_UP)
-
-# Dummy button for now
-class DummyButton:
-    def value(self): return 1  # Always "not pressed"
-BTN_STOP = DummyButton()
+BTN_STOP = Pin(2, Pin.IN, Pin.PULL_UP)
 
 buzzer_stop_requested = False
 
