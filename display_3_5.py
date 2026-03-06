@@ -74,11 +74,17 @@ class lcd_st7796(framebuf.FrameBuffer):
 
         # Initialize display hardware BEFORE turning on backlight
         self._init_display()
-        
-        # Now set backlight and clear if framebuffer exists
-        self.bl_ctrl(bl)
+
+        # Push a clean black frame to controller RAM before enabling backlight.
+        # The controller retains its last frame after a soft reset, so without
+        # this the stale image (e.g. logo from previous boot stage) would flash
+        # briefly the moment the backlight comes on.
         if fb is not None:
             self.fill(0x0000)
+            self.show()
+
+        # Backlight on — screen is already black, no stale-frame flash.
+        self.bl_ctrl(bl)
 
     def write_cmd(self, cmd):
         self.dc(0); self.cs(0)
