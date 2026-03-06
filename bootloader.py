@@ -41,12 +41,18 @@ def log_exc(tag, e):
 # ---------- GitHub & Paths ----------
 GITHUB_USER   = "SLWRTHNU"
 GITHUB_REPO   = "Iris-Classic"
-GITHUB_BRANCH = "main"
-API_BASE = "https://api.github.com/repos/{}/{}/contents/".format(GITHUB_USER, GITHUB_REPO)
+# TEST BRANCH — change to "main" for production
+GITHUB_BRANCH = "claude/review-code-access-ym9AV"
+RAW_BASE = "https://raw.githubusercontent.com/{}/{}/{}".format(
+    GITHUB_USER, GITHUB_REPO, GITHUB_BRANCH)
 
-VERSIONS_PATH = "versions.json"
+VERSIONS_PATH      = "versions.json"
 LOCAL_VERSION_FILE = "local_version.txt"
 DEVICE_ID_FILE     = "device_id.txt"
+
+def raw_url(path):
+    """Return a raw.githubusercontent.com URL for the given repo-relative path."""
+    return RAW_BASE + "/" + path.lstrip("/")
 
 # ---------- Display driver ----------
 
@@ -307,53 +313,23 @@ def connect_wifi(lcd, ssid, pwd, timeout_sec=45, retries=2):
 
 # ---------- Update check ----------
 def fetch_versions_json(lcd):
+    """Fetch versions.json from raw CDN. Returns parsed dict or None."""
     import urequests as requests
-    import ubinascii
-
-    url = gh_contents_url(VERSIONS_PATH) + "&nocache={}".format(time.ticks_ms())
+    # Cache-bust so CDN doesn't return a stale copy
+    url = raw_url(VERSIONS_PATH) + "?nocache={}".format(time.ticks_ms())
     r = None
     try:
         gc.collect()
-        r = requests.get(url, headers=gh_api_headers_raw(), timeout=8)
-
-        # safest on MicroPython: use r.text (file is tiny)
-        txt = r.text
-        if not txt:
+        r = requests.get(url, headers={"User-Agent": "Iris", "Connection": "close"}, timeout=8)
+        if r.status_code != 200:
             return None
-
-        # Case A: raw file content (should be {"version":...})
-        try:
-            data = json.loads(txt)
-        except Exception as e:
-            return None
-
-        # Case B: contents API metadata (has "content" base64)
-        if "content" in data and "encoding" in data:
-            if data.get("encoding") == "base64":
-                try:
-                    decoded = ubinascii.a2b_base64(data["content"])
-                    data = json.loads(decoded)
-                except Exception as e:
-                    return None
-
-        rv = (data.get("version") or "").strip()
-        return data
-
+        return json.loads(r.text)
     except Exception as e:
         return None
     finally:
         try:
             if r:
                 r.close()
-        except:
-            pass
-        r = None
-        try:
-            txt = None
-        except:
-            pass
-        try:
-            data = None
         except:
             pass
         gc.collect()
@@ -363,12 +339,12 @@ def fetch_versions_json(lcd):
 def gh_download_to_file(path, out_path):
     import urequests as requests
 
-    url = gh_contents_url(path)
+    url = raw_url(path)
     r = None
     gc.collect()
     try:
         gc.collect()
-        r = requests.get(url, headers=gh_api_headers_raw(), timeout=10)
+        r = requests.get(url, headers={"User-Agent": "Iris", "Connection": "close"}, timeout=15)
 
         log_kv("dl status {}".format(out_path), r.status_code)
         raw = getattr(r, "raw", None)
@@ -711,7 +687,25 @@ def main():
     if not connected:
         show_wifi_failed(lcd)
         return
-    
+
+    # --- OTA update check ---
+    draw_bottom_status(lcd, "Checking for updates...")
+    local_v = ""
+    try:
+        with open(LOCAL_VERSION_FILE, "r") as f:
+            local_v = f.read().strip()
+    except:
+        pass
+
+    vers = fetch_versions_json(lcd)
+    if vers:
+        remote_v = (vers.get("version") or "").strip()
+        if remote_v and remote_v != local_v:
+            # perform_update writes local_version.txt and reboots on success;
+            # on failure it returns False and we continue booting with old code.
+            perform_update(vers, lcd)
+    # If versions match (or fetch failed) fall through to app_main normally.
+
     # Save framebuffer BEFORE cleanup
     saved_fb = lcd.buffer if lcd else None
     
