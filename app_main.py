@@ -1368,10 +1368,8 @@ def main(framebuffer=None):
         )
         gc.collect()
 
-    # 7. WATCHDOG DISABLED FOR TROUBLESHOOTING
-    # wdt = WDT(timeout=8000)
-    wdt = None
-    print("⚠️  Watchdog disabled - for troubleshooting only!")
+    # 7. WATCHDOG - reset device if main loop stalls for more than 20s
+    wdt = WDT(timeout=20000)
 
     # 8. START ASYNC LOOP
     asyncio.run(async_main(
