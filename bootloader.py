@@ -1,7 +1,6 @@
 #bootloader.py - ESP32-S3 version
 
 from machine import Pin
-import utime
 
 # ESP32-S3: Buzzer disabled for bootloader
 # (Not needed during setup/config)
@@ -689,18 +688,14 @@ def main():
             
             # Show setup instructions and start server
             run_setup_mode(lcd)
-            import setup_server
-            setup_server.run()
             return
-    
+
     except Exception as e:
         # Error checking for config - assume missing and enter setup
         if lcd is None:
             lcd = init_lcd()
         draw_boot_logo(lcd)
         run_setup_mode(lcd)
-        import setup_server
-        setup_server.run()
         return
     
     # Config exists - proceed with normal boot

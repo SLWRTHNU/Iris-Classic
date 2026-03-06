@@ -20,7 +20,6 @@ class DummyPin:
 BUZ = DummyPin()
 
 import gc
-import utime
 import network
 import uasyncio as asyncio
 
@@ -1183,27 +1182,12 @@ async def task_buzzer_driver():
 
 
 
-# Improved Factory Reset Task - Using Built-in Pico Font
-
-# COMPLETE FACTORY RESET FUNCTION - Replace in app_main.py
-
-# ESP32-S3: Factory reset task disabled (now handled in boot.py)
-# async def task_factory_reset(...):
-#     ... entire function commented out ...
-async def task_factory_reset(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
-    """Disabled - factory reset now handled by boot.py"""
-    while True:
-        await asyncio.sleep(1)
-
-
 async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
     global wdt
     
     # Memory monitoring removed - not needed with 8MB RAM
     asyncio.create_task(task_power_monitor())
     asyncio.create_task(task_dimmer(lcd))
-    asyncio.create_task(task_factory_reset(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
-
     asyncio.create_task(task_buzzer_stop_button())
     asyncio.create_task(task_buzzer_driver())
     

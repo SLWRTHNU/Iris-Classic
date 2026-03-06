@@ -217,28 +217,27 @@ class Writer:
         self._get_char(char, recurse)
         if self.glyph is None:
             return
-    
+
         # Determine colors
         fg = self.bgcolor if invert else self.fgcolor
         bg = self.fgcolor if invert else self.bgcolor
-    
-        # Get glyph data once
-        glyph, char_height, char_width = self.font.get_ch(char)
+
+        # _get_char already fetched and stored glyph data — reuse it
+        glyph = self.glyph
+        char_height = self.char_height
+        char_width = self.char_width
         bytes_per_row = (char_width + 7) // 8
-    
+
         # Draw the character pixel by pixel
         for row in range(char_height):
             for col in range(char_width):
-                # Calculate byte and bit position
                 byte_idx = (row * bytes_per_row) + (col // 8)
                 bit_idx = 7 - (col % 8)
-            
-                # Check if pixel is set
                 if (glyph[byte_idx] >> bit_idx) & 1:
                     self.device.pixel(s.text_col + col, s.text_row + row, fg)
                 else:
                     self.device.pixel(s.text_col + col, s.text_row + row, bg)
-                
+
         s.text_col += char_width
         self.cpos += 1
 
@@ -291,29 +290,28 @@ class CWriter(Writer):
         self._get_char(char, recurse)
         if self.glyph is None:
             return
-        
+
         # Determine colors
         fg = self.bgcolor if invert else self.fgcolor
         bg = self.fgcolor if invert else self.bgcolor
-        
+
+        # _get_char already fetched and stored glyph data — reuse it
+        glyph = self.glyph
+        char_height = self.char_height
+        char_width = self.char_width
+        bytes_per_row = (char_width + 7) // 8
+
         # Draw the character pixel by pixel
-        for row in range(self.char_height):
-            for col in range(self.char_width):
-                # Get pixel from glyph (0 or 1)
-                pixel = self.font.get_ch(char)[0] # Simplified for clarity
-                # Instead of the above, use this robust way:
-                glyph, char_height, char_width = self.font.get_ch(char)
-                
-                # Logic to extract bit from monochrome glyph
-                byte_idx = (row * ((char_width + 7) // 8)) + (col // 8)
+        for row in range(char_height):
+            for col in range(char_width):
+                byte_idx = (row * bytes_per_row) + (col // 8)
                 bit_idx = 7 - (col % 8)
                 if (glyph[byte_idx] >> bit_idx) & 1:
                     self.device.pixel(s.text_col + col, s.text_row + row, fg)
-                
                 else:
                     self.device.pixel(s.text_col + col, s.text_row + row, bg)
-                    
-        s.text_col += self.char_width
+
+        s.text_col += char_width
         self.cpos += 1
 
     def setcolor(self, fgcolor=None, bgcolor=None):
