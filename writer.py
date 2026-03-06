@@ -11,8 +11,6 @@ class DisplayState:
 
 
 def _get_id(device):
-    if not isinstance(device, framebuf.FrameBuffer):
-        raise ValueError("Device must be derived from FrameBuffer.")
     return id(device)
 
 
@@ -218,14 +216,30 @@ class Writer:
         s = self._getstate()
         self._get_char(char, recurse)
         if self.glyph is None:
-            return  # All done
-        buf = bytearray(self.glyph)
-        if invert:
-            for i, v in enumerate(buf):
-                buf[i] = 0xFF & ~v
-        fbc = framebuf.FrameBuffer(buf, self.char_width, self.char_height, self.map)
-        self.device.blit(fbc, s.text_col, s.text_row)
-        s.text_col += self.char_width
+            return
+    
+        # Determine colors
+        fg = self.bgcolor if invert else self.fgcolor
+        bg = self.fgcolor if invert else self.bgcolor
+    
+        # Get glyph data once
+        glyph, char_height, char_width = self.font.get_ch(char)
+        bytes_per_row = (char_width + 7) // 8
+    
+        # Draw the character pixel by pixel
+        for row in range(char_height):
+            for col in range(char_width):
+                # Calculate byte and bit position
+                byte_idx = (row * bytes_per_row) + (col // 8)
+                bit_idx = 7 - (col % 8)
+            
+                # Check if pixel is set
+                if (glyph[byte_idx] >> bit_idx) & 1:
+                    self.device.pixel(s.text_col + col, s.text_row + row, fg)
+                else:
+                    self.device.pixel(s.text_col + col, s.text_row + row, bg)
+                
+        s.text_col += char_width
         self.cpos += 1
 
     def set_spacing(self, pixels=0):
@@ -261,8 +275,8 @@ class CWriter(Writer):
         return idx
 
     def __init__(self, device, font, fgcolor=None, bgcolor=None, verbose=True):
-        if not hasattr(device, "palette"):
-            raise OSError("Incompatible device driver.")
+        #if not hasattr(device, "palette"):
+        #    raise OSError("Incompatible device driver.")
 
         super().__init__(device, font, verbose)
         if bgcolor is not None:  # Assume monochrome.
@@ -276,17 +290,29 @@ class CWriter(Writer):
         s = self._getstate()
         self._get_char(char, recurse)
         if self.glyph is None:
-            return  # All done
-        buf = bytearray_at(addressof(self.glyph), len(self.glyph))
-        fbc = framebuf.FrameBuffer(buf, self.char_width, self.char_height, self.map)
-        palette = self.device.palette
+            return
         
-        # FINAL CORRECTED LOGIC: This ensures the 1-bit font is correctly mapped to 16-bit colors 
-        # after the hardware's BGR issue has been resolved by the 0x78 command.
-        palette.bg(self.fgcolor if invert else self.bgcolor) 
-        palette.fg(self.bgcolor if invert else self.fgcolor)
+        # Determine colors
+        fg = self.bgcolor if invert else self.fgcolor
+        bg = self.fgcolor if invert else self.bgcolor
         
-        self.device.blit(fbc, s.text_col, s.text_row, -1, palette)
+        # Draw the character pixel by pixel
+        for row in range(self.char_height):
+            for col in range(self.char_width):
+                # Get pixel from glyph (0 or 1)
+                pixel = self.font.get_ch(char)[0] # Simplified for clarity
+                # Instead of the above, use this robust way:
+                glyph, char_height, char_width = self.font.get_ch(char)
+                
+                # Logic to extract bit from monochrome glyph
+                byte_idx = (row * ((char_width + 7) // 8)) + (col // 8)
+                bit_idx = 7 - (col % 8)
+                if (glyph[byte_idx] >> bit_idx) & 1:
+                    self.device.pixel(s.text_col + col, s.text_row + row, fg)
+                
+                else:
+                    self.device.pixel(s.text_col + col, s.text_row + row, bg)
+                    
         s.text_col += self.char_width
         self.cpos += 1
 
