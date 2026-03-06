@@ -20,7 +20,6 @@ class DummyPin:
 BUZ = DummyPin()
 
 import gc
-import utime
 import network
 import uasyncio as asyncio
 
@@ -684,6 +683,7 @@ class ScreenState:
 
 
         self.last_have_data = False
+        self.wifi_lost = False
 
 
 
@@ -949,6 +949,9 @@ def draw_all_fields_if_needed(
     if st.factory_mode:
         return
 
+    if st.wifi_lost:
+        return
+
     W, H = lcd.width, lcd.height
     
     y_age = 6
@@ -1035,6 +1038,21 @@ def draw_all_fields_if_needed(
     _end_batch(lcd)
 
 
+def draw_wifi_lost_screen(lcd, w_small, st):
+    if st.wifi_lost:
+        return
+    st.wifi_lost = True
+    W, H = lcd.width, lcd.height
+    lcd.fill(BLACK)
+    fh = w_small.font.height()
+    w_small.setcolor(WHITE, BLACK)
+    for msg, y in (("WiFi Lost", H // 2 - fh - 4), ("Retrying...", H // 2 + 4)):
+        x = max(0, (W - w_small.stringlen(msg)) // 2)
+        w_small.set_textpos(lcd, y, x)
+        w_small.printstring(msg)
+    lcd.show()
+
+
 async def task_power_monitor():
     # watches USB status and updates power_change_until
     global last_usb, power_change_until
@@ -1102,17 +1120,40 @@ async def task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delt
 
     while True:
         if wdt:
-            wdt.feed()  # Feed before network operations
-        
-        now = utime.ticks_ms()
+            wdt.feed()
 
+        # Detect WiFi drop
+        try:
+            wlan = network.WLAN(network.STA_IF)
+            connected = wlan.active() and wlan.isconnected()
+        except Exception:
+            connected = False
+
+        if not connected:
+            draw_wifi_lost_screen(lcd, w_small, st)
+            await asyncio.sleep_ms(5000)
+            continue
+
+        # WiFi is back - clear error state and force a full redraw
+        if st.wifi_lost:
+            st.wifi_lost = False
+            st.last_have_data = False
+            st.age_text = None
+            st.bg_text = None
+            st.arrow_text = None
+            st.delta_text = None
+            st.heart_on = None
+            st.batt_x = None
+            st.batt_pos = None
+
+        now = utime.ticks_ms()
         if utime.ticks_diff(now, power_change_until) >= 0:
             try:
                 txt = fetch_ns_text()
                 parsed = parse_entries_from_text(txt)
                 if parsed:
                     last = parsed
-                    check_glucose_alerts(last["bg"]) 
+                    check_glucose_alerts(last["bg"])
                     draw_all_fields_if_needed(
                         lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
                         hb_state, st
@@ -1183,17 +1224,17 @@ async def task_buzzer_driver():
 
 
 
-# Improved Factory Reset Task - Using Built-in Pico Font
-
-# COMPLETE FACTORY RESET FUNCTION - Replace in app_main.py
-
-# ESP32-S3: Factory reset task disabled (now handled in boot.py)
-# async def task_factory_reset(...):
-#     ... entire function commented out ...
-async def task_factory_reset(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
-    """Disabled - factory reset now handled by boot.py"""
+async def task_wifi_reconnect(st):
+    global wdt
     while True:
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
+        if not st.wifi_lost:
+            continue
+        if wdt:
+            wdt.feed()
+        connect_wifi(WIFI_SSID, WIFI_PASSWORD)
+        if wdt:
+            wdt.feed()
 
 
 async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
@@ -1202,8 +1243,6 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
     # Memory monitoring removed - not needed with 8MB RAM
     asyncio.create_task(task_power_monitor())
     asyncio.create_task(task_dimmer(lcd))
-    asyncio.create_task(task_factory_reset(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
-
     asyncio.create_task(task_buzzer_stop_button())
     asyncio.create_task(task_buzzer_driver())
     
@@ -1212,6 +1251,7 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
     asyncio.create_task(task_heartbeat(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
     asyncio.create_task(task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
     asyncio.create_task(task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
+    asyncio.create_task(task_wifi_reconnect(st))
 
     while True:
         if wdt:
@@ -1384,10 +1424,8 @@ def main(framebuffer=None):
         )
         gc.collect()
 
-    # 7. WATCHDOG DISABLED FOR TROUBLESHOOTING
-    # wdt = WDT(timeout=8000)
-    wdt = None
-    print("⚠️  Watchdog disabled - for troubleshooting only!")
+    # 7. WATCHDOG - reset device if main loop stalls for more than 20s
+    wdt = WDT(timeout=20000)
 
     # 8. START ASYNC LOOP
     asyncio.run(async_main(
