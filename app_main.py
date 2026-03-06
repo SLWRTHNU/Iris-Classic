@@ -606,7 +606,14 @@ def parse_entries_from_text(txt):
     if cur_mills is None:
         cur_mills, _ = _find_int_after(txt, '"date":', p)
 
-    direction, p3 = _find_str_after(txt, '"direction":', p)
+    direction, p3 = _find_str_after(txt, '"direction":', 0)  # search from start, not p, so field order doesn't matter
+
+    # Fallback: some CGM bridges omit "direction" and only send a numeric "trend"
+    if not direction or direction == "NONE":
+        trend_num, _ = _find_int_after(txt, '"trend":', 0)
+        if trend_num is not None:
+            direction = {1:"DoubleUp", 2:"SingleUp", 3:"FortyFiveUp", 4:"Flat",
+                         5:"FortyFiveDown", 6:"SingleDown", 7:"DoubleDown"}.get(trend_num)
 
     prev_sgv, _ = _find_int_after(txt, '"sgv":', p)
 
