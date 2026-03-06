@@ -63,9 +63,12 @@ BLUE   = 0x001F
 BLACK  = 0x0000
 WHITE  = 0xFFFF
 
-BAR_HEIGHT  = 12
-Y_POS       = 307  # 320 - 13 (bottom of screen)
-STATUS_X    = 3
+LOGO_FILE  = "logo.bin"
+LOGO_W     = 480
+LOGO_H     = 320
+BAR_HEIGHT = 12
+Y_POS      = 307  # 320 - 13 (bottom of screen)
+STATUS_X   = 3
 
 # ---------- LCD hard reset/backlight ----------
 LCD_BL_PIN = 15
@@ -205,7 +208,16 @@ def draw_bottom_status(lcd, status_msg, show_id=None):
 def draw_boot_screen(lcd):
     if lcd is None:
         return
-    lcd.fill(BLACK)
+    # Load logo into framebuffer; fall back to black if file is missing/wrong size
+    try:
+        if os.stat(LOGO_FILE)[6] == LOGO_W * LOGO_H * 2:
+            with open(LOGO_FILE, "rb") as f:
+                f.readinto(lcd.buffer)
+        else:
+            lcd.fill(BLACK)
+    except:
+        lcd.fill(BLACK)
+    gc.collect()
     lcd.show()
     draw_bottom_status(lcd, "Booting...")
 

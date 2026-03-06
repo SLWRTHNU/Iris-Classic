@@ -1423,14 +1423,9 @@ def main(framebuffer=None):
     lcd = LCD_Driver(fb=framebuffer, bl=80)  # Fixed 80% brightness (dimmer disabled until new pot installed)
     globals()["LCD"] = lcd
     
-    # 1b. SHOW BOOT LOGO
-    logo_shown = show_logo(lcd)
-    if not logo_shown:
-        # No logo file - show black screen
-        lcd.fill(BLACK)
-        lcd.show()
-    
-    # Logo stays on screen until WiFi connects and data loads
+    # Start with a black screen; data draw will populate it immediately.
+    lcd.fill(BLACK)
+    lcd.show()
 
     # DELETE BOOTLOADER FONTS IMMEDIATELY
     import sys
