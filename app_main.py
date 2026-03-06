@@ -260,12 +260,8 @@ def connect_wifi(ssid, password, max_attempts=2):
 
     return False
 
-# ESP32-S3: Potentiometer disabled for now
-# pot = ADC(Pin(1))  # GPIO 1 is ADC when wired
-# For now, return fixed brightness value
-class DummyADC:
-    def read_u16(self): return 65535  # Max brightness
-pot = DummyADC()
+pot = ADC(Pin(1))
+pot.atten(ADC.ATTN_11DB)  # Full 0-3.3V range
 
 MIN_BL = 1
 MAX_BL = 100
