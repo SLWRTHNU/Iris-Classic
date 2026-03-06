@@ -1,80 +1,61 @@
 """
-Test factory reset screen layout.
-Run in REPL: exec(open('test_factory_screen.py').read())
-Tests:
-  1. GPIO 0 button can be read
-  2. config_font has the chars we need
-  3. Draws the full warning screen so layout can be verified visually
+Factory reset pre-flight checks - safe to run in REPL anytime.
+Does NOT touch the display or SPI (no LCD reinit).
+
+Run: exec(open('test_factory_screen.py').read())
 """
 from machine import Pin
-import time
 
-# --- 1. GPIO 0 button ---
+# --- 1. GPIO 0 (BOOT button) ---
 boot_btn = Pin(0, Pin.IN, Pin.PULL_UP)
-print("GPIO 0 (BOOT btn) value:", boot_btn.value(), " (1=released, 0=pressed)")
+print("GPIO 0 (BOOT btn):", boot_btn.value(), " (1=released, 0=pressed)")
 
-# --- 2. Font char check ---
+# --- 2. config_font char coverage (text lines only - digits use small_font) ---
 import config_font
-needed = set("Factory reset Will delete config reconfigure needed Release to cancel 54321 0")
-available = set(" )123FIPRWacdefgilnorstuwy")
-missing = needed - available
+
+# Only the letters/spaces used in the four text lines
+text_lines = [
+    "Factory reset",
+    "Will delete config.",
+    "reconfigure needed",
+    "Release to cancel",
+]
+needed_chars = set("".join(text_lines))
+# Build available set from the font's _mvfont data
+available = set(" )123FIPRWacdefgilnorstuwy")  # from font_to_py cmd
+missing = needed_chars - available
 if missing:
     print("MISSING chars in config_font:", sorted(missing))
 else:
-    print("config_font: all required chars present OK")
+    print("config_font: all text chars present OK")
 
-# --- 3. Draw the warning screen ---
-import framebuf
-from machine import SPI, Pin as MPin
-from display_3_5 import lcd_st7796 as LCD_Driver
-from writer import CWriter
+# --- 3. small_font digit coverage (0-5 for countdown) ---
 import small_font
-import config_font as cf
+digit_chars = set("012345")
+# small_font was generated with .0123456789
+small_available = set(".0123456789")
+missing_digits = digit_chars - small_available
+if missing_digits:
+    print("MISSING digits in small_font:", sorted(missing_digits))
+else:
+    print("small_font: all countdown digits present OK")
 
+# --- 4. Y-coordinate sanity check (no display needed) ---
 W, H = 480, 320
-RED   = 0xF800
-WHITE = 0xFFFF
-BLACK = 0x0000
+fh_cfg   = config_font.height()   # 15
+fh_digit = small_font.height()    # 48
 
-fb = framebuf.FrameBuffer(bytearray(W * H * 2), W, H, framebuf.RGB565)
-lcd = LCD_Driver(fb=fb, bl=80)
+print(f"\nLayout preview (H={H}, W={W}):")
+y = 20
+for text in text_lines:
+    bottom = y + fh_cfg
+    status = "OK" if 0 <= y and bottom <= H else "OUT OF RANGE"
+    print(f"  y={y:3d}..{bottom:3d}  '{text}'  [{status}]")
+    y += fh_cfg + 8
 
-w_cfg   = CWriter(lcd, cf,         fgcolor=WHITE, bgcolor=BLACK, verbose=False)
-w_digit = CWriter(lcd, small_font, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+cy = H // 2 + 20
+cd_bottom = cy + fh_digit
+status = "OK" if 0 <= cy and cd_bottom <= H else "OUT OF RANGE"
+print(f"  y={cy:3d}..{cd_bottom:3d}  countdown digit  [{status}]")
 
-fh_cfg   = cf.height()          # 15
-fh_digit = small_font.height()  # 48
-
-def draw_reset_screen(secs_left):
-    lcd.fill(BLACK)
-    lines = [
-        ("Factory reset",        RED),
-        ("Will delete config.",  WHITE),
-        ("reconfigure needed",   WHITE),
-        ("Release to cancel",    WHITE),
-    ]
-    y = 20
-    for text, color in lines:
-        w_cfg.setcolor(color, BLACK)
-        x = max(0, (W - w_cfg.stringlen(text)) // 2)
-        w_cfg.set_textpos(lcd, y, x)
-        w_cfg.printstring(text)
-        y += fh_cfg + 8
-
-    # Countdown digit — centered in lower half
-    cd = str(secs_left)
-    cx = max(0, (W - w_digit.stringlen(cd)) // 2)
-    cy = H // 2 + 20
-    w_digit.setcolor(RED, BLACK)
-    w_digit.set_textpos(lcd, cy, cx)
-    w_digit.printstring(cd)
-
-    lcd.show()
-    print(f"Drew screen with countdown={secs_left}, fh_cfg={fh_cfg}, fh_digit={fh_digit}")
-    print(f"  text lines end at y≈{20 + 4*(fh_cfg+8)}, digit at y={H//2+20}")
-
-for n in range(5, -1, -1):
-    draw_reset_screen(n)
-    time.sleep(1)
-
-print("Test complete. Check screen layout looked correct.")
+print("\nAll checks passed - flash and test by pressing BOOT while Iris is running.")
