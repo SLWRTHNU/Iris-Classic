@@ -67,7 +67,7 @@ Content-Type: text/html
         .form-card { max-width: 500px; width: 100%; background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); border-top: 6px solid var(--primary-color); }
         h1 { color: var(--primary-color); font-size: 1.5em; margin-top: 0; }
         fieldset { border: 1px solid var(--border-color); border-radius: 8px; margin-bottom: 15px; padding: 10px 15px; }
-        legend { font-weight: bold; color: var(--primary-color); px: 5px; }
+        legend { font-weight: bold; color: var(--primary-color); padding: 0 5px; }
         .form-group { margin-bottom: 12px; }
         label { display: block; font-size: 0.85em; margin-bottom: 4px; font-weight: 600; }
         input, select { width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; box-sizing: border-box; font-size: 16px; }
@@ -75,7 +75,39 @@ Content-Type: text/html
         .checkbox-group input { width: auto; margin-right: 12px; transform: scale(1.4); }
         .checkbox-group label { margin-bottom: 0; font-size: 0.9em; cursor: pointer; }
         .submit-btn { background: var(--primary-color); color: white; padding: 14px; border: none; border-radius: 8px; width: 100%; font-weight: bold; font-size: 1em; cursor: pointer; margin-top: 10px; }
+        .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 10px; border-radius: 6px; font-size: 0.85em; color: #856404; margin-bottom: 10px; }
+        .indent { margin-left: 24px; }
+        .radio-group { margin-bottom: 10px; }
+        .radio-option { display: flex; align-items: flex-start; padding: 8px; background: #f0f4f8; border-radius: 6px; margin-bottom: 6px; }
+        .radio-option input { margin-right: 10px; margin-top: 2px; flex-shrink: 0; }
+        .radio-option label { text-align: left; }
     </style>
+    <script>
+        function toggleCustomLow() {
+            const useThreshold = document.getElementById('use_threshold').checked;
+            const customField = document.getElementById('custom_low_field');
+            customField.style.display = useThreshold ? 'none' : 'block';
+        }
+        
+        function toggleLowValue() {
+            const enabled = document.getElementById('low_enabled').checked;
+            const radioGroup = document.getElementById('low_radio_group');
+            const customField = document.getElementById('custom_low_field');
+            const warning = document.getElementById('low_warning');
+            
+            radioGroup.style.display = enabled ? 'block' : 'none';
+            customField.style.display = 'none';
+            warning.style.display = enabled ? 'none' : 'block';
+        }
+        
+        function toggleSevereValue() {
+            const enabled = document.getElementById('severe_enabled').checked;
+            const valueField = document.getElementById('severe_value_field');
+            const warning = document.getElementById('severe_warning');
+            valueField.style.display = enabled ? 'block' : 'none';
+            warning.style.display = enabled ? 'none' : 'block';
+        }
+    </script>
 </head>
 <body>
 <div class="form-card">
@@ -86,18 +118,72 @@ Content-Type: text/html
             <div class="form-group"><label>SSID</label><input type="text" name="ssid" required></div>
             <div class="form-group"><label>Password</label><input type="password" name="pwd" required></div>
         </fieldset>
+        
         <fieldset>
             <legend>☁️ Nightscout</legend>
             <div class="form-group"><label>URL</label><input type="url" name="ns_url" placeholder="https://..." required></div>
             <div class="form-group"><label>API Secret</label><input type="text" name="token" required></div>
             <div class="form-group"><label>Endpoint</label><input type="text" name="endpoint" value="/api/v1/entries/sgv.json?count=2"></div>
         </fieldset>
+        
         <fieldset>
-            <legend>📈 Alerts & Units</legend>
+            <legend>📊 Display Settings</legend>
             <div class="form-group"><label>Units</label><select name="units"><option value="mmol">mmol/L</option><option value="mgdl">mg/dL</option></select></div>
-            <div class="form-group"><label>High Line</label><input type="number" name="high" value="11.0" step="0.1"></div>
-            <div class="form-group"><label>Low Line</label><input type="number" name="low" value="4.0" step="0.1"></div>
-            <div class="form-group"><label>Stale (min)</label><input type="number" name="stale" value="7"></div>
+            <div class="form-group"><label>High Threshold (Yellow)</label><input type="number" name="high" value="11.0" step="0.1"></div>
+            <div class="form-group"><label>Low Threshold (Red)</label><input type="number" name="low" value="4.0" step="0.1"></div>
+            <div class="form-group"><label>Stale Age (minutes)</label><input type="number" name="stale" value="7"></div>
+        </fieldset>
+        
+        <fieldset>
+            <legend>🔔 Alert Settings (Classic/Classic Go Only.)</legend>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="low_enabled" name="low_enabled" value="True" checked onclick="toggleLowValue()">
+                <label for="low_enabled">Enable Low Alert (3 beeps)</label>
+            </div>
+            
+            <div class="warning" id="low_warning" style="display:none;">
+                ⚠️ <strong>Warning:</strong> Disabling low alerts is not recommended for safety reasons.
+            </div>
+            
+            <div class="radio-group indent" id="low_radio_group">
+                <div class="radio-option">
+                    <input type="radio" id="use_threshold" name="low_mode" value="threshold" checked onclick="toggleCustomLow()">
+                    <label for="use_threshold">Use Low Threshold (same as color)</label>
+                </div>
+                <div class="radio-option">
+                    <input type="radio" id="use_custom" name="low_mode" value="custom" onclick="toggleCustomLow()">
+                    <label for="use_custom">Use Custom Alert Value</label>
+                </div>
+            </div>
+            
+            <div class="form-group indent" id="custom_low_field" style="display:none;">
+                <label>Custom Low Alert Value</label>
+                <input type="number" name="low_custom" value="4.0" step="0.1">
+            </div>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="severe_enabled" name="severe_enabled" value="True" checked onclick="toggleSevereValue()">
+                <label for="severe_enabled">Enable Severe Low Alert (constant tone)</label>
+            </div>
+            
+            <div class="warning" id="severe_warning" style="display:none;">
+                ⚠️ <strong>Warning:</strong> Disabling severe alerts is not recommended for safety reasons.
+            </div>
+            
+            <div class="form-group indent" id="severe_value_field">
+                <label>Severe Low Threshold</label>
+                <input type="number" name="severe" value="3.0" step="0.1">
+            </div>
+            
+            <div class="form-group">
+                <label>Snooze Duration (minutes)</label>
+                <input type="number" name="snooze" value="10" min="1" max="60">
+            </div>
+        </fieldset>
+        
+        <fieldset>
+            <legend>📈 Trend Alerts</legend>
             <div class="checkbox-group">
                 <input type="checkbox" id="up" name="alert_up" value="True" checked>
                 <label for="up">Yellow Arrow on Double Up</label>
@@ -107,6 +193,7 @@ Content-Type: text/html
                 <label for="down">Red Arrow on Double Down</label>
             </div>
         </fieldset>
+        
         <button type="submit" class="submit-btn">Save & Reboot</button>
     </form>
 </div>
@@ -197,21 +284,42 @@ def run():
             if path.startswith('/save'):
                 params = parse_params(path)
                 
+                # Checkbox values
                 up = "True" if "alert_up" in params else "False"
                 dn = "True" if "alert_down" in params else "False"
+                low_enabled = "True" if "low_enabled" in params else "False"
+                severe_enabled = "True" if "severe_enabled" in params else "False"
+                
+                # Low alert mode (threshold vs custom)
+                low_mode = params.get('low_mode', 'threshold')
+                use_threshold = "True" if low_mode == 'threshold' else "False"
                 
                 with open("config.py", "w") as f:
+                    f.write("# WiFi Configuration\n")
                     f.write("WIFI_SSID = '{}'\n".format(params.get('ssid', '')))
                     f.write("WIFI_PASSWORD = '{}'\n".format(params.get('pwd', '')))
+                    f.write("\n# Nightscout Configuration\n")
                     f.write("NS_URL = '{}'\n".format(params.get('ns_url', '').rstrip('/')))
                     f.write("API_SECRET = '{}'\n".format(params.get('token', '')))
                     f.write("API_ENDPOINT = '{}'\n".format(params.get('endpoint', '')))
+                    f.write("\n# Display Units\n")
                     f.write("UNITS = '{}'\n".format(params.get('units', 'mmol')))
+                    f.write("\n# Color Thresholds\n")
                     f.write("THRESHOLD_LOW = {}\n".format(params.get('low', '4.0')))
                     f.write("THRESHOLD_HIGH = {}\n".format(params.get('high', '11.0')))
-                    f.write("STALE_MINS = {}\n".format(params.get('stale', '7')))
+                    f.write("\n# Alert Thresholds\n")
+                    f.write("ALERT_LOW_ENABLED = {}\n".format(low_enabled))
+                    f.write("ALERT_LOW_USE_THRESHOLD = {}\n".format(use_threshold))
+                    f.write("ALERT_LOW_CUSTOM = {}\n".format(params.get('low_custom', '4.0')))
+                    f.write("ALERT_SEVERE_ENABLED = {}\n".format(severe_enabled))
+                    f.write("ALERT_SEVERE_THRESHOLD = {}\n".format(params.get('severe', '3.0')))
+                    f.write("\n# Alert Snooze Duration\n")
+                    f.write("ALERT_SNOOZE_MINUTES = {}\n".format(params.get('snooze', '10')))
+                    f.write("\n# Trend-Based Alerts\n")
                     f.write("ALERT_DOUBLE_UP = {}\n".format(up))
                     f.write("ALERT_DOUBLE_DOWN = {}\n".format(dn))
+                    f.write("\n# Data Staleness\n")
+                    f.write("STALE_MINS = {}\n".format(params.get('stale', '7')))
                 
                 cl.send(CONFIG_SAVED_HTML)
                 cl.close()
@@ -233,8 +341,3 @@ def run():
             if cl:
                 try: cl.close()
                 except: pass
-
-
-
-
-
