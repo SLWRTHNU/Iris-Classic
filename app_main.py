@@ -1222,7 +1222,8 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
     
     # Memory monitoring removed - not needed with 8MB RAM
     asyncio.create_task(task_power_monitor())
-    asyncio.create_task(task_dimmer(lcd))
+    # task_dimmer disabled until new potentiometer is installed
+    # asyncio.create_task(task_dimmer(lcd))
     asyncio.create_task(task_buzzer_stop_button())
     asyncio.create_task(task_buzzer_driver())
     
@@ -1241,7 +1242,7 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
 
 
 def _draw_batt_x_if_changed(lcd, w_batt, st, x=10, y=8):
-    new_text = "" if is_usb_connected() else "0"
+    new_text = ""  # Battery icon disabled until hardware is installed
     new_pos = (x, y)
 
     # Only skip if BOTH the icon AND the position are unchanged
@@ -1344,7 +1345,7 @@ def main(framebuffer=None):
     wdt = None
 
     # 1. INIT DISPLAY
-    lcd = LCD_Driver(fb=framebuffer, bl=100)  # Init with backlight on
+    lcd = LCD_Driver(fb=framebuffer, bl=80)  # Fixed 80% brightness (dimmer disabled until new pot installed)
     globals()["LCD"] = lcd
     
     # 1b. SHOW BOOT LOGO
