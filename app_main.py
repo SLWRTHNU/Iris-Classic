@@ -1260,12 +1260,20 @@ async def task_buzzer_driver():
         # Mode 2: MILD pattern (respects snooze)
         if buzzer_mode == 2 and not snoozed:
             if utime.ticks_diff(now, last_mild_beep_time) >= MILD_COOLDOWN_MS:
-                for _ in range(3):
-                    if BTN_STOP.value() == 0:
-                        request_buzzer_stop()
+                # 3-beep sequence, repeated 3 times with a 1-second gap
+                stopped = False
+                for _rep in range(3):
+                    if stopped:
                         break
-                    BUZ.value(0); await asyncio.sleep_ms(120)
-                    BUZ.value(1); await asyncio.sleep_ms(120)
+                    for _ in range(3):
+                        if BTN_STOP.value() == 0:
+                            request_buzzer_stop()
+                            stopped = True
+                            break
+                        BUZ.value(0); await asyncio.sleep_ms(150)
+                        BUZ.value(1); await asyncio.sleep_ms(150)
+                    if not stopped and _rep < 2:
+                        await asyncio.sleep_ms(1000)
                 last_mild_beep_time = utime.ticks_ms()
 
             BUZ.value(1)
@@ -1373,7 +1381,7 @@ SEVERE_LOW_THRESHOLD = ALERT_SEVERE_THRESHOLD
 # Buzzer mode: 0=off, 1=severe solid, 2=mild pattern
 buzzer_mode = 0
 
-last_mild_beep_time = utime.ticks_ms() - BUZZER_SNOOZE_MS
+last_mild_beep_time = utime.ticks_add(utime.ticks_ms(), -BUZZER_SNOOZE_MS)
 MILD_COOLDOWN_MS = BUZZER_SNOOZE_MS
 
 
