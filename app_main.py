@@ -1040,58 +1040,48 @@ async def task_factory_reset_button(lcd, w_small, st):
     """Hold BOOT (GPIO 0) while running to trigger a 5-second countdown factory reset."""
     import os
     from machine import reset as machine_reset
-
     W, H = lcd.width, lcd.height
     # config_font (15px) has the letters we need; w_small (48px digits) for the countdown
     w_cfg = CWriter(lcd, font_config, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
     fh_cfg = font_config.height()  # 15px
-
     while True:
         # Wait for button press (active-low)
         if _BOOT_BTN.value() != 0:
             await asyncio.sleep_ms(50)
             continue
-
         # --- Button is pressed: show warning screen ---
         st.factory_mode = True
         aborted = False
-
         for secs_left in range(5, -1, -1):
             # Re-check: if button was released, abort
             if _BOOT_BTN.value() != 0:
                 aborted = True
                 break
-
             # Draw warning screen using config_font for text, w_small for digit
             lcd.fill(BLACK)
-
             lines = [
-                ("Factory reset",       RED),
-                ("Will delete config.", WHITE),
-                ("reconfigure needed",  WHITE),
+                ("Factory Reset",       RED),
+                ("Will erase your settings", WHITE),
+                ("Full setup will be needed",  WHITE),
                 ("Release to cancel",   WHITE),
             ]
-            y = 20
+            y = 60
             for text, color in lines:
                 w_cfg.setcolor(color, BLACK)
                 x = max(0, (W - w_cfg.stringlen(text)) // 2)
                 w_cfg.set_textpos(lcd, y, x)
                 w_cfg.printstring(text)
                 y += fh_cfg + 8
-
             # Countdown digit — centered, lower half of screen
             countdown = str(secs_left)
             cx = max(0, (W - w_small.stringlen(countdown)) // 2)
-            cy = H // 2 + 20
+            cy = H // 2 + 60
             w_small.setcolor(RED, BLACK)
             w_small.set_textpos(lcd, cy, cx)
             w_small.printstring(countdown)
-
             lcd.show()
-
             if secs_left == 0:
                 break  # countdown done — execute reset below
-
             # Poll button every 100 ms for up to 1 second so release is detected fast
             for _ in range(10):
                 await asyncio.sleep_ms(100)
@@ -1100,7 +1090,6 @@ async def task_factory_reset_button(lcd, w_small, st):
                     break
             if aborted:
                 break
-
         if aborted:
             # Restore normal screen
             st.factory_mode = False
@@ -1110,7 +1099,6 @@ async def task_factory_reset_button(lcd, w_small, st):
             while _BOOT_BTN.value() == 0:
                 await asyncio.sleep_ms(50)
             continue
-
         # Countdown reached 0 — perform factory reset
         try:
             os.remove("config.py")
