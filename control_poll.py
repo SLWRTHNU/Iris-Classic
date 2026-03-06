@@ -106,7 +106,7 @@ def tick(lcd=None):
                     time.sleep(2) # IMPORTANT: Let the file system finish writing
                     
                     # This forces a hard hardware reset
-                    machine.WDT(timeout=1000) 
+                    machine.WDT(timeout=2000) 
                     while True:
                         pass # Wait for the dog to bite
                 else:
@@ -118,3 +118,4 @@ def tick(lcd=None):
             
     except Exception as e:
         print("POLL: Logic Error:", e)
+
