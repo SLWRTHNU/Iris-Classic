@@ -54,6 +54,7 @@ import arrows_font as font_arrows
 import heart as font_heart
 import delta as font_delta
 import battery_font
+import config_font as font_config
 import big_digits
 from big_digits_draw import draw_big_text
 BIG_DIGITS_HEIGHT = 140
@@ -1041,6 +1042,9 @@ async def task_factory_reset_button(lcd, w_small, st):
     from machine import reset as machine_reset
 
     W, H = lcd.width, lcd.height
+    # config_font (15px) has the letters we need; w_small (48px digits) for the countdown
+    w_cfg = CWriter(lcd, font_config, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+    fh_cfg = font_config.height()  # 15px
 
     while True:
         # Wait for button press (active-low)
@@ -1058,26 +1062,29 @@ async def task_factory_reset_button(lcd, w_small, st):
                 aborted = True
                 break
 
-            # Draw / refresh the warning screen each second
+            # Draw warning screen using config_font for text, w_small for digit
             lcd.fill(BLACK)
-            fh = w_small.font.height()
 
             lines = [
-                ("!! FACTORY RESET !!", RED,   H // 2 - fh * 3),
-                ("Config will be deleted.",     WHITE, H // 2 - fh),
-                ("You will need to reconfigure.", WHITE, H // 2),
-                ("Release to cancel.",          WHITE, H // 2 + fh + 4),
+                ("Factory reset",       RED),
+                ("Will delete config.", WHITE),
+                ("reconfigure needed",  WHITE),
+                ("Release to cancel",   WHITE),
             ]
-            for text, color, y in lines:
-                w_small.setcolor(color, BLACK)
-                x = max(0, (W - w_small.stringlen(text)) // 2)
-                w_small.set_textpos(lcd, y, x)
-                w_small.printstring(text)
+            y = 20
+            for text, color in lines:
+                w_cfg.setcolor(color, BLACK)
+                x = max(0, (W - w_cfg.stringlen(text)) // 2)
+                w_cfg.set_textpos(lcd, y, x)
+                w_cfg.printstring(text)
+                y += fh_cfg + 8
 
+            # Countdown digit — centered, lower half of screen
             countdown = str(secs_left)
-            w_small.setcolor(RED, BLACK)
             cx = max(0, (W - w_small.stringlen(countdown)) // 2)
-            w_small.set_textpos(lcd, H // 2 - fh * 5, cx)
+            cy = H // 2 + 20
+            w_small.setcolor(RED, BLACK)
+            w_small.set_textpos(lcd, cy, cx)
             w_small.printstring(countdown)
 
             lcd.show()
