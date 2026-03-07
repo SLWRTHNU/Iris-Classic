@@ -31,6 +31,11 @@ NS_URL        = cfg("NS_URL", "")
 NS_TOKEN      = cfg("API_SECRET", "")
 API_ENDPOINT  = cfg("API_ENDPOINT", "/api/v1/entries/sgv.json?count=2")
 DISPLAY_UNITS = cfg("UNITS", "mmol")
+DATA_SOURCE    = cfg("DATA_SOURCE", "nightscout")   # "nightscout" or "dexcom_share"
+DEXCOM_USERNAME = cfg("DEXCOM_USERNAME", "")
+DEXCOM_PASSWORD = cfg("DEXCOM_PASSWORD", "")
+DEXCOM_REGION   = cfg("DEXCOM_REGION", "us")        # "us" or "ous" (outside US)
+
 
 LOW_THRESHOLD  = float(cfg("THRESHOLD_LOW", 4.0))
 HIGH_THRESHOLD = float(cfg("THRESHOLD_HIGH", 11.0))
@@ -593,6 +598,176 @@ def _find_str_after(s, key, start=0):
 
     return s[q1 + 1:q2], q2 + 1
 
+
+# ---------------------------------------------------------------------------
+# Dexcom Share API
+# ---------------------------------------------------------------------------
+_DEXCOM_APP_ID   = "d8665ade-9673-4e27-9ff6-92db4ce13d13"
+_DEXCOM_TREND_MAP = {
+    1: "DoubleUp", 2: "SingleUp", 3: "FortyFiveUp", 4: "Flat",
+    5: "FortyFiveDown", 6: "SingleDown", 7: "DoubleDown",
+}
+_dexcom_session = None  # cached session GUID
+
+
+def _dexcom_post(host, path, json_body=""):
+    """HTTPS POST to Dexcom Share host. Returns (status, body_str) or (None, None)."""
+    import usocket, ssl, utime
+
+    body_bytes = json_body.encode("utf-8") if json_body else b""
+    req = (
+        "POST {} HTTP/1.1\r\n"
+        "Host: {}\r\n"
+        "Content-Type: application/json\r\n"
+        "Accept: application/json\r\n"
+        "Content-Length: {}\r\n"
+        "Connection: close\r\n\r\n"
+    ).format(path, host, len(body_bytes)).encode("utf-8") + body_bytes
+
+    s = None
+    try:
+        if wdt:
+            wdt.feed()
+        addr = usocket.getaddrinfo(host, 443)[0][-1]
+        s = usocket.socket()
+        s.settimeout(10)
+        s.connect(addr)
+        s = ssl.wrap_socket(s, server_hostname=host)
+        if wdt:
+            wdt.feed()
+        s.send(req)
+
+        buf = bytearray()
+        t0 = utime.ticks_ms()
+        while utime.ticks_diff(utime.ticks_ms(), t0) < 8000:
+            if wdt:
+                wdt.feed()
+            try:
+                chunk = s.recv(256)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf.extend(chunk)
+            if len(buf) > 2048:
+                break
+
+        raw = bytes(buf)
+        sep = raw.find(b"\r\n\r\n")
+        if sep < 0:
+            return None, None
+
+        head = raw[:sep].decode("utf-8", "ignore")
+        body_str = raw[sep + 4:].decode("utf-8", "ignore")
+        parts = head.split("\r\n", 1)[0].split(" ")
+        status = int(parts[1]) if len(parts) >= 2 else None
+        return status, body_str
+
+    except Exception:
+        return None, None
+    finally:
+        try:
+            if s:
+                s.close()
+        except:
+            pass
+
+
+def fetch_dexcom():
+    """Fetch latest glucose readings from Dexcom Share. Returns same dict as parse_entries_from_text."""
+    global _dexcom_session
+
+    if not DEXCOM_USERNAME or not DEXCOM_PASSWORD:
+        return None
+
+    host = "shareous1.dexcom.com" if DEXCOM_REGION.lower() == "ous" else "share2.dexcom.com"
+    login_path = "/ShareWebServices/Services/General/LoginPublisherAccountByName"
+    read_path_tmpl = (
+        "/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues"
+        "?sessionId={}&minutes=1440&maxCount=2"
+    )
+
+    def _login():
+        global _dexcom_session
+        body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
+            DEXCOM_USERNAME, DEXCOM_PASSWORD, _DEXCOM_APP_ID
+        )
+        status, resp = _dexcom_post(host, login_path, body)
+        if status == 200 and resp:
+            sid = resp.strip().strip('"')
+            if len(sid) > 10:
+                _dexcom_session = sid
+                return True
+        _dexcom_session = None
+        return False
+
+    for _attempt in range(2):
+        if not _dexcom_session:
+            if not _login():
+                return None
+
+        status, resp = _dexcom_post(host, read_path_tmpl.format(_dexcom_session))
+
+        if status in (None, 401, 500):
+            _dexcom_session = None  # session expired; retry with fresh login
+            continue
+
+        if status != 200 or not resp:
+            return None
+
+        resp = resp.strip()
+        if not resp or resp[0] != '[':
+            return None
+
+        # Parse first entry: {"DT":"/Date(ms+tz)/","Trend":4,"Value":120,...}
+        cur_val, p1 = _find_int_after(resp, '"Value":')
+        if cur_val is None:
+            return None
+
+        cur_trend, _ = _find_int_after(resp, '"Trend":')
+
+        # Timestamp: find first /Date(ms...)/ pattern
+        time_ms = 0
+        dt_start = resp.find("/Date(")
+        if dt_start >= 0:
+            dt_end = resp.find(")", dt_start)
+            dt_inner = resp[dt_start + 6:dt_end]   # e.g. "1709123456789+0000"
+            try:
+                sign = dt_inner.find("+")
+                if sign < 0:
+                    sign = dt_inner.find("-")
+                time_ms = int(dt_inner[:sign] if sign > 0 else dt_inner)
+            except Exception:
+                time_ms = 0
+
+        prev_val, _ = _find_int_after(resp, '"Value":', p1)
+        delta = None
+        if prev_val is not None:
+            diff = float(cur_val) - float(prev_val)
+            delta = diff if str(DISPLAY_UNITS).lower() == "mgdl" else diff / 18.0
+
+        direction = _DEXCOM_TREND_MAP.get(cur_trend, "NONE") if cur_trend is not None else "NONE"
+        return {
+            "bg":        mgdl_to_units(cur_val),
+            "time_ms":   time_ms,
+            "direction": direction,
+            "arrow":     direction_to_arrow(direction),
+            "delta":     delta,
+        }
+
+    return None
+
+
+def fetch_and_parse():
+    """Unified data fetch: routes to Nightscout or Dexcom Share based on DATA_SOURCE config."""
+    if DATA_SOURCE == "dexcom_share":
+        return fetch_dexcom()
+    # Default: Nightscout
+    txt = fetch_ns_text()
+    return parse_entries_from_text(txt)
+
+
+# ---------------------------------------------------------------------------
 
 def parse_entries_from_text(txt):
     if not txt:
@@ -1210,8 +1385,7 @@ async def task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delt
         now = utime.ticks_ms()
         if utime.ticks_diff(now, power_change_until) >= 0:
             try:
-                txt = fetch_ns_text()
-                parsed = parse_entries_from_text(txt)
+                parsed = fetch_and_parse()
                 if parsed:
                     last = parsed
                     check_glucose_alerts(last["bg"])
@@ -1474,8 +1648,7 @@ def main(framebuffer=None):
 
     # 5. INITIAL DATA FETCH
     try:
-        txt = fetch_ns_text()
-        parsed = parse_entries_from_text(txt)
+        parsed = fetch_and_parse()
         if parsed:
             last = parsed
             check_glucose_alerts(last["bg"])
