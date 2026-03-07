@@ -721,11 +721,14 @@ def fetch_dexcom():
         status, resp = _dexcom_post(host, login_path, body)
         if status == 200 and resp:
             sid = resp.strip().strip('"')
-            if len(sid) > 10:
+            if len(sid) > 10 and sid != "00000000-0000-0000-0000-000000000000":
                 _dexcom_session = sid
                 print("[Dexcom] Login OK, session:", sid[:8], "...")
                 return True
-            print("[Dexcom] Login 200 but unexpected body:", resp[:80])
+            if sid == "00000000-0000-0000-0000-000000000000":
+                print("[Dexcom] Login rejected: invalid credentials (check username/password)")
+            else:
+                print("[Dexcom] Login 200 but unexpected body:", resp[:80])
         else:
             print("[Dexcom] Login failed, status:", status)
         _dexcom_session = None
