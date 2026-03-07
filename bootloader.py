@@ -208,12 +208,27 @@ def draw_bottom_status(lcd, status_msg, show_id=None):
 def draw_boot_screen(lcd):
     if lcd is None:
         return
-    # Load logo into framebuffer; fall back to a simple text screen if missing/wrong size
     logo_ok = False
     try:
-        if os.stat(LOGO_FILE)[6] == LOGO_W * LOGO_H * 2:
+        size = os.stat(LOGO_FILE)[6]
+        if size == LOGO_W * LOGO_H * 2:
+            # Exact match — load directly into framebuffer
             with open(LOGO_FILE, "rb") as f:
                 f.readinto(lcd.buffer)
+            logo_ok = True
+        elif size == 320 * 240 * 2:
+            # 320×240 logo — center it on the 480×320 display
+            lcd.fill(BLACK)
+            x_off = (LOGO_W - 320) // 2   # 80 px padding each side
+            y_off = (LOGO_H - 240) // 2   # 40 px padding top/bottom
+            row_bytes = 320 * 2
+            with open(LOGO_FILE, "rb") as f:
+                for row in range(240):
+                    chunk = f.read(row_bytes)
+                    if not chunk:
+                        break
+                    dst = ((y_off + row) * LOGO_W + x_off) * 2
+                    lcd.buffer[dst:dst + row_bytes] = chunk
             logo_ok = True
     except:
         pass
