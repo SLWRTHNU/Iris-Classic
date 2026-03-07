@@ -1,16 +1,14 @@
 # dexcom_test.py - Run this directly in the MicroPython shell to test Dexcom Share
 # Paste into Thonny editor and run with %Run -c $EDITOR_CONTENT
 
-import usocket, ssl, utime, network
+import usocket, ssl, utime
 
-# ---- CONFIG: paste your credentials here ----
+# ---- CONFIG ----
 USERNAME = "sennaloop"
 PASSWORD = "YOUR_PASSWORD_HERE"   # fill in
-REGION   = "ous"                  # "us" or "ous"
-# ---------------------------------------------
+# ----------------
 
 APP_ID = "d8665ade-9673-4e27-9ff6-92db4ce13d13"
-host   = "shareous1.dexcom.com" if REGION == "ous" else "share2.dexcom.com"
 
 def post(host, path, body_str=""):
     body_bytes = body_str.encode() if body_str else b""
@@ -43,88 +41,79 @@ def post(host, path, body_str=""):
     raw = bytes(buf)
     sep = raw.find(b"\r\n\r\n")
     if sep < 0:
-        print("No headers found, raw:", raw[:200])
         return None, None, None
 
     head = raw[:sep].decode("utf-8", "ignore")
     body_raw = raw[sep+4:].decode("utf-8", "ignore")
-    status = int(head.split("\r\n")[0].split()[1])
 
-    # Print full headers so we can see transfer-encoding etc.
-    print("--- HEADERS ---")
-    print(head)
-    print("--- RAW BODY ---")
-    print(repr(body_raw[:300]))
-
-    # Chunked decode
     if "transfer-encoding: chunked" in head.lower():
-        print("(chunked — decoding...)")
-        body_str = ""
+        decoded = ""
         pos = 0
         while pos < len(body_raw):
             nl = body_raw.find("\r\n", pos)
-            if nl < 0:
-                break
+            if nl < 0: break
             try:
                 chunk_len = int(body_raw[pos:nl], 16)
             except:
                 break
-            if chunk_len == 0:
-                break
-            body_str += body_raw[nl+2 : nl+2+chunk_len]
+            if chunk_len == 0: break
+            decoded += body_raw[nl+2 : nl+2+chunk_len]
             pos = nl + 2 + chunk_len + 2
-    else:
-        body_str = body_raw
-
-    print("--- DECODED BODY ---")
-    print(body_str[:500])
-    return status, head, body_str
+        return head, decoded
+    return head, body_raw
 
 
-# Step 1: Login
-print("\n=== LOGIN ===")
-login_body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
-    USERNAME, PASSWORD, APP_ID)
-status, head, body = post(host, "/ShareWebServices/Services/General/LoginPublisherAccountByName", login_body)
-if not body:
-    print("Login failed")
-    raise SystemExit
+def try_server(host):
+    print("\n--- Trying:", host, "---")
+    login_body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
+        USERNAME, PASSWORD, APP_ID)
+    head, body = post(host, "/ShareWebServices/Services/General/LoginPublisherAccountByName", login_body)
+    if not body:
+        print("  Login: no response")
+        return False
 
-session = body.strip().strip('"')
-print("Session:", session)
+    session = body.strip().strip('"')
+    if session == "00000000-0000-0000-0000-000000000000":
+        print("  Login: BAD CREDENTIALS")
+        return False
 
-if session == "00000000-0000-0000-0000-000000000000":
-    print("BAD CREDENTIALS — wrong username or password")
-    raise SystemExit
+    print("  Login OK, session:", session[:8], "...")
 
-# Step 2: Fetch readings
-print("\n=== READINGS ===")
-path = "/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId={}&minutes=1440&maxCount=2".format(session)
-status, head, body = post(host, path)
+    path = "/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId={}&minutes=1440&maxCount=2".format(session)
+    head, body = post(host, path)
+    print("  Readings body:", repr(body[:100]) if body else "None")
 
-if not body or body.strip() == "[]":
-    print("\nEmpty readings []")
-    print("=> Dexcom Share is not set up or has no followers.")
-    print("=> In the Dexcom app: Share > Enable > Invite a follower (any email).")
-else:
-    # Quick parse of first reading
-    def find_int(s, key, start=0):
-        i = s.find(key, start)
-        if i < 0: return None, -1
+    if not body or body.strip() == "[]":
+        print("  => Empty []")
+        return False
+
+    # Parse
+    def find_int(s, key):
+        i = s.find(key)
+        if i < 0: return None
         i += len(key)
-        while i < len(s) and s[i] in " \t\r\n": i += 1
+        while i < len(s) and s[i] in " \t": i += 1
         j = i
         if j < len(s) and s[j] == '-': j += 1
         while j < len(s) and s[j].isdigit(): j += 1
-        if j == i: return None, -1
-        return int(s[i:j]), j
+        return int(s[i:j]) if j > i else None
 
-    mgdl, _ = find_int(body, '"Value":')
-    trend, _ = find_int(body, '"Trend":')
-    trends = {1:"↑↑", 2:"↑", 3:"↗", 4:"→", 5:"↘", 6:"↓", 7:"↓↓"}
-    arrow = trends.get(trend, "?")
+    mgdl  = find_int(body, '"Value":')
+    trend = find_int(body, '"Trend":')
+    mmol  = round(mgdl / 18.0, 1) if mgdl else None
+    arrows = {1:"↑↑", 2:"↑", 3:"↗", 4:"→", 5:"↘", 6:"↓", 7:"↓↓"}
+    print("  => BG: {} mg/dL / {} mmol/L  {}".format(mgdl, mmol, arrows.get(trend, "?")))
+    return True
 
-    mmol = round(mgdl / 18.0, 1) if mgdl else None
-    print("\n=== RESULT ===")
-    print("BG:    {} mg/dL  /  {} mmol/L".format(mgdl, mmol))
-    print("Trend: {} ({})".format(arrow, trend))
+
+print("=== Dexcom Share server test ===")
+found = False
+for srv in ("share2.dexcom.com", "shareous1.dexcom.com"):
+    if try_server(srv):
+        print("\nWORKING SERVER:", srv)
+        found = True
+        break
+
+if not found:
+    print("\nNeither server returned readings.")
+    print("Check: CGM active, Share enabled, follower accepted invite.")
