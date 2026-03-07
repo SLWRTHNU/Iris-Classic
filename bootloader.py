@@ -217,18 +217,26 @@ def draw_boot_screen(lcd):
                 f.readinto(lcd.buffer)
             logo_ok = True
         elif size == 320 * 240 * 2:
-            # 320×240 logo — center it on the 480×320 display
-            lcd.fill(BLACK)
-            x_off = (LOGO_W - 320) // 2   # 80 px padding each side
-            y_off = (LOGO_H - 240) // 2   # 40 px padding top/bottom
-            row_bytes = 320 * 2
+            # 320×240 logo — scale up to fill 480×320 (nearest-neighbour)
+            src_w, src_h = 320, 240
+            dst_w, dst_h = LOGO_W, LOGO_H
+            # Pre-compute source byte offset for each destination column (once)
+            col_src = [dx * src_w // dst_w * 2 for dx in range(dst_w)]
+            src_row_buf = bytearray(src_w * 2)
+            dst_row_buf = bytearray(dst_w * 2)
+            last_sy = -1
             with open(LOGO_FILE, "rb") as f:
-                for row in range(240):
-                    chunk = f.read(row_bytes)
-                    if not chunk:
-                        break
-                    dst = ((y_off + row) * LOGO_W + x_off) * 2
-                    lcd.buffer[dst:dst + row_bytes] = chunk
+                for dy in range(dst_h):
+                    sy = dy * src_h // dst_h
+                    if sy != last_sy:
+                        f.readinto(src_row_buf)
+                        last_sy = sy
+                    for dx in range(dst_w):
+                        s = col_src[dx]
+                        dst_row_buf[dx * 2]     = src_row_buf[s]
+                        dst_row_buf[dx * 2 + 1] = src_row_buf[s + 1]
+                    dst = dy * dst_w * 2
+                    lcd.buffer[dst:dst + dst_w * 2] = dst_row_buf
             logo_ok = True
     except:
         pass
