@@ -16,7 +16,7 @@ import uasyncio as asyncio
 
 gc.collect()
 
-from machine import WDT, ADC, Pin
+from machine import ADC, Pin
 
 
 # ---------- Config ----------
@@ -1636,7 +1636,6 @@ def check_glucose_alerts(bg_value):
 def main(framebuffer=None):
     import utime
     import network
-    from machine import WDT
 
     global last, hb_state, wdt, wifi_ok
     last = None
@@ -1698,10 +1697,7 @@ def main(framebuffer=None):
         )
         gc.collect()
 
-    # 7. WATCHDOG - reset device if main loop stalls for more than 20s
-    wdt = WDT(timeout=20000)
-
-    # 8. START ASYNC LOOP
+    # 7. START ASYNC LOOP
     asyncio.run(async_main(
         lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st
     ))
