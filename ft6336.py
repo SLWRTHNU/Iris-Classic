@@ -42,14 +42,29 @@ class FT6336:
                  debounce_ms=400):
         # Reset the touch controller
         self._rst = Pin(rst_pin, Pin.OUT, value=0)
-        utime.sleep_ms(10)
+        utime.sleep_ms(20)
         self._rst.value(1)
-        utime.sleep_ms(50)
+        utime.sleep_ms(300)   # FT6336U needs ~200 ms after reset to be ready
 
         self._irq = Pin(int_pin, Pin.IN, Pin.PULL_UP)
         self._i2c = I2C(0, sda=Pin(sda), scl=Pin(scl), freq=400_000)
         self._debounce_ms = debounce_ms
         self._last_tap_ms = 0
+
+        # Scan so we know if the device is reachable
+        found = self._i2c.scan()
+        if _FT_ADDR not in found:
+            print("FT6336: WARNING - device not found on I2C. Scan:", [hex(d) for d in found])
+        else:
+            print("FT6336: found at 0x{:02X}".format(_FT_ADDR))
+
+        # Set interrupt mode to TRIGGER (0x01) so INT stays LOW while touched.
+        # Default is POLLING (0x00) where INT only pulses briefly — too fast to
+        # catch at 50 ms poll intervals.
+        try:
+            self._i2c.writeto_mem(_FT_ADDR, 0xA4, bytes([0x01]))
+        except OSError:
+            print("FT6336: could not set interrupt mode (device may not be present)")
 
     def is_touched(self):
         """True if screen is currently being pressed (reads INT pin, no I2C)."""

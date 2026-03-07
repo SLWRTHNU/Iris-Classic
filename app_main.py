@@ -1526,15 +1526,22 @@ async def task_wifi_reconnect(st):
 
 async def task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
     global focus_mode, hb_state
-    from ft6336 import FT6336
-    touch = FT6336()
+    try:
+        from ft6336 import FT6336
+        touch = FT6336()
+    except Exception as e:
+        print("task_touch: FT6336 init failed:", e)
+        return
     while True:
-        if touch.poll_tap():
-            focus_mode = not focus_mode
-            draw_all_fields_if_needed(
-                lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
-                hb_state, st
-            )
+        try:
+            if touch.poll_tap():
+                focus_mode = not focus_mode
+                draw_all_fields_if_needed(
+                    lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
+                    hb_state, st
+                )
+        except Exception as e:
+            print("task_touch: poll error:", e)
         await asyncio.sleep_ms(50)
 
 

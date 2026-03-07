@@ -208,15 +208,31 @@ def draw_bottom_status(lcd, status_msg, show_id=None):
 def draw_boot_screen(lcd):
     if lcd is None:
         return
-    # Load logo into framebuffer; fall back to black if file is missing/wrong size
+    # Load logo into framebuffer; fall back to a simple text screen if missing/wrong size
+    logo_ok = False
     try:
         if os.stat(LOGO_FILE)[6] == LOGO_W * LOGO_H * 2:
             with open(LOGO_FILE, "rb") as f:
                 f.readinto(lcd.buffer)
-        else:
-            lcd.fill(BLACK)
+            logo_ok = True
     except:
+        pass
+
+    if not logo_ok:
         lcd.fill(BLACK)
+        # Draw "Iris" wordmark in white, centered
+        label = "IRIS"
+        char_w = 8
+        x = (lcd.width - len(label) * char_w * 4) // 2
+        y = (lcd.height - 16) // 2 - 20
+        # Scale up using repeated text rows for a larger appearance
+        for row in range(4):
+            lcd.text(label, x + row, y + row, WHITE)
+        # Subtitle
+        sub = "Starting up..."
+        sx = (lcd.width - len(sub) * char_w) // 2
+        lcd.text(sub, sx, y + 40, 0xC618)  # light grey
+
     gc.collect()
     lcd.show()
     draw_bottom_status(lcd, "Booting...")
