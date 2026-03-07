@@ -36,6 +36,7 @@ DATA_SOURCE    = cfg("DATA_SOURCE", "nightscout")   # "nightscout" or "dexcom_sh
 DEXCOM_USERNAME = cfg("DEXCOM_USERNAME", "")
 DEXCOM_PASSWORD = cfg("DEXCOM_PASSWORD", "")
 DEXCOM_REGION   = cfg("DEXCOM_REGION", "us")        # "us" or "ous" (outside US)
+TOUCH_ENABLED   = cfg("TOUCH_ENABLED", False)       # True once TP_SDA/SCL/INT/RST are wired
 
 
 LOW_THRESHOLD  = float(cfg("THRESHOLD_LOW", 4.0))
@@ -1554,7 +1555,8 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
     asyncio.create_task(task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
     asyncio.create_task(task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
     asyncio.create_task(task_wifi_reconnect(st))
-    asyncio.create_task(task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
+    if TOUCH_ENABLED:
+        asyncio.create_task(task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
 
     while True:
         if wdt:
