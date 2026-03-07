@@ -220,18 +220,22 @@ def draw_boot_screen(lcd):
 
     if not logo_ok:
         lcd.fill(BLACK)
-        # Draw "Iris" wordmark in white, centered
-        label = "IRIS"
-        char_w = 8
-        x = (lcd.width - len(label) * char_w * 4) // 2
-        y = (lcd.height - 16) // 2 - 20
-        # Scale up using repeated text rows for a larger appearance
-        for row in range(4):
-            lcd.text(label, x + row, y + row, WHITE)
-        # Subtitle
-        sub = "Starting up..."
-        sx = (lcd.width - len(sub) * char_w) // 2
-        lcd.text(sub, sx, y + 40, 0xC618)  # light grey
+        try:
+            import config_font_title
+            import config_font
+            from writer import CWriter
+            w_title = CWriter(lcd, config_font_title, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+            w_body  = CWriter(lcd, config_font,       fgcolor=WHITE, bgcolor=BLACK, verbose=False)
+            tw = w_title.stringlen("Iris")
+            w_title.set_textpos(lcd, (lcd.height - 60) // 2, (lcd.width - tw) // 2)
+            w_title.printstring("Iris")
+            sw = w_body.stringlen("Starting up...")
+            w_body.set_textpos(lcd, (lcd.height - 60) // 2 + 50, (lcd.width - sw) // 2)
+            w_body.printstring("Starting up...")
+        except Exception:
+            # Last resort: tiny built-in font
+            lcd.text("Iris", (lcd.width - 32) // 2, lcd.height // 2 - 10, WHITE)
+            lcd.text("Starting up...", (lcd.width - 112) // 2, lcd.height // 2 + 10, WHITE)
 
     gc.collect()
     lcd.show()

@@ -72,13 +72,14 @@ class FT6336:
 
     def poll_tap(self):
         """
-        Returns True once per tap event (leading edge, debounced).
+        Returns True once per tap event (debounced).
+        Polls via I2C — does not rely on the INT pin.
         Call from an async task every ~50 ms.
         """
-        if not self.is_touched():
-            return False
         now = utime.ticks_ms()
         if utime.ticks_diff(now, self._last_tap_ms) < self._debounce_ms:
+            return False
+        if self.get_touch() is None:
             return False
         self._last_tap_ms = now
         return True
