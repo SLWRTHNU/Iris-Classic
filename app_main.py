@@ -5,6 +5,7 @@ import utime
 hb_state = True
 wdt = None
 factory_reset_exit_requested = False  # ADD THIS LINE
+focus_mode = False  # Touch toggle: True = show BG + heartbeat only
 
 BUZ = Pin(17, Pin.IN, Pin.PULL_UP)
 utime.sleep_ms(10)
@@ -1141,7 +1142,7 @@ def draw_all_fields_if_needed(
     hb_state,
     st
 ):
-    global last
+    global last, focus_mode
 
     
     if st.factory_mode:
@@ -1226,13 +1227,20 @@ def draw_all_fields_if_needed(
 
     delta_text = fmt_delta(last["delta"])
     
+    # In focus mode, hide age/trend/delta — show only BG and heartbeat
+    if focus_mode:
+        age_text   = ""
+        arrow_text = ""
+        delta_text = ""
+
     _begin_batch()
     _draw_age_if_changed(lcd, w_age_small, age_text, age_color, st, y_age)
     _draw_heart_if_changed(lcd, w_heart, hb_state, st, x_heart, y_heart, pad=2)
     _draw_bg_if_changed(lcd, bg_text, bg_color, st, y_bg)
     _draw_arrow_if_changed(lcd, w_arrow, arrow_text, arrow_color, st, x_arrow, y_arrow, x_offset=10, y_offset=-10)
     _draw_delta_if_changed(lcd, w_small, w_delta_icon, delta_text, st, y_delta, right_margin=4)
-    _draw_batt_x_if_changed(lcd, w_batt, st, x=10, y=8)
+    if not focus_mode:
+        _draw_batt_x_if_changed(lcd, w_batt, st, x=10, y=8)
     _end_batch(lcd)
 
 
@@ -1515,6 +1523,20 @@ async def task_wifi_reconnect(st):
             wdt.feed()
 
 
+async def task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
+    global focus_mode, hb_state
+    from xpt2046 import XPT2046
+    touch = XPT2046()
+    while True:
+        if touch.poll_tap():
+            focus_mode = not focus_mode
+            draw_all_fields_if_needed(
+                lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
+                hb_state, st
+            )
+        await asyncio.sleep_ms(50)
+
+
 async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
     global wdt
     
@@ -1532,6 +1554,7 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
     asyncio.create_task(task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
     asyncio.create_task(task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
     asyncio.create_task(task_wifi_reconnect(st))
+    asyncio.create_task(task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
 
     while True:
         if wdt:
