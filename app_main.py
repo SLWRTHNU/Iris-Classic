@@ -620,6 +620,7 @@ def _dexcom_post(host, path, json_body=""):
         "Host: {}\r\n"
         "Content-Type: application/json\r\n"
         "Accept: application/json\r\n"
+        "User-Agent: Dexcom Share/3.0.2.11 CFNetwork/711.2.23 Darwin/14.0.0\r\n"
         "Content-Length: {}\r\n"
         "Connection: close\r\n\r\n"
     ).format(path, host, len(body_bytes)).encode("utf-8") + body_bytes
@@ -628,6 +629,7 @@ def _dexcom_post(host, path, json_body=""):
     try:
         if wdt:
             wdt.feed()
+        print("[Dexcom] POST", host, path[:50])
         addr = usocket.getaddrinfo(host, 443)[0][-1]
         s = usocket.socket()
         s.settimeout(10)
@@ -655,15 +657,18 @@ def _dexcom_post(host, path, json_body=""):
         raw = bytes(buf)
         sep = raw.find(b"\r\n\r\n")
         if sep < 0:
+            print("[Dexcom] No HTTP header in response, raw[:80]:", bytes(buf)[:80])
             return None, None
 
         head = raw[:sep].decode("utf-8", "ignore")
         body_str = raw[sep + 4:].decode("utf-8", "ignore")
         parts = head.split("\r\n", 1)[0].split(" ")
         status = int(parts[1]) if len(parts) >= 2 else None
+        print("[Dexcom] HTTP", status, "| body[:100]:", body_str[:100])
         return status, body_str
 
-    except Exception:
+    except Exception as e:
+        print("[Dexcom] POST error:", e)
         return None, None
     finally:
         try:
@@ -692,23 +697,30 @@ def fetch_dexcom():
         body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
             DEXCOM_USERNAME, DEXCOM_PASSWORD, _DEXCOM_APP_ID
         )
+        print("[Dexcom] Logging in as:", DEXCOM_USERNAME)
         status, resp = _dexcom_post(host, login_path, body)
         if status == 200 and resp:
             sid = resp.strip().strip('"')
             if len(sid) > 10:
                 _dexcom_session = sid
+                print("[Dexcom] Login OK, session:", sid[:8], "...")
                 return True
+            print("[Dexcom] Login 200 but unexpected body:", resp[:80])
+        else:
+            print("[Dexcom] Login failed, status:", status)
         _dexcom_session = None
         return False
 
     for _attempt in range(2):
         if not _dexcom_session:
             if not _login():
+                print("[Dexcom] Aborting after failed login")
                 return None
 
         status, resp = _dexcom_post(host, read_path_tmpl.format(_dexcom_session))
 
         if status in (None, 401, 500):
+            print("[Dexcom] Readings request returned", status, "- will re-login")
             _dexcom_session = None  # session expired; retry with fresh login
             continue
 
