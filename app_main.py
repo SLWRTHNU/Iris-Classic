@@ -1525,8 +1525,8 @@ async def task_wifi_reconnect(st):
 
 async def task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
     global focus_mode, hb_state
-    from xpt2046 import XPT2046
-    touch = XPT2046()
+    from ft6336 import FT6336
+    touch = FT6336()
     while True:
         if touch.poll_tap():
             focus_mode = not focus_mode
