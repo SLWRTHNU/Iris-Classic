@@ -99,7 +99,7 @@ def read_glucose(host, session, endpoint_type):
     status, body = post(host, path)
     print("  {} endpoint HTTP {}: {}".format(
         endpoint_type, status, repr(body[:80]) if body else "None"))
-    if body and body.strip() not in ("[]", ""):
+    if status == 200 and body and body.strip() not in ("[]", ""):
         return body
     return None
 
