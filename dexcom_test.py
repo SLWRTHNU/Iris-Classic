@@ -41,10 +41,17 @@ def post(host, path, body_str=""):
     raw = bytes(buf)
     sep = raw.find(b"\r\n\r\n")
     if sep < 0:
-        return None, None, None
+        return None, None
 
     head = raw[:sep].decode("utf-8", "ignore")
     body_raw = raw[sep+4:].decode("utf-8", "ignore")
+
+    # Extract HTTP status code
+    status = None
+    try:
+        status = int(head.split(" ", 2)[1])
+    except Exception:
+        pass
 
     if "transfer-encoding: chunked" in head.lower():
         decoded = ""
@@ -59,32 +66,44 @@ def post(host, path, body_str=""):
             if chunk_len == 0: break
             decoded += body_raw[nl+2 : nl+2+chunk_len]
             pos = nl + 2 + chunk_len + 2
-        return head, decoded
-    return head, body_raw
+        return status, decoded
+    return status, body_raw
 
 
 def try_server(host):
     print("\n--- Trying:", host, "---")
     login_body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
         USERNAME, PASSWORD, APP_ID)
-    head, body = post(host, "/ShareWebServices/Services/General/LoginPublisherAccountByName", login_body)
+    status, body = post(host, "/ShareWebServices/Services/General/LoginPublisherAccountByName", login_body)
     if not body:
-        print("  Login: no response")
+        print("  Login: no response (HTTP {})".format(status))
+        return False
+
+    if status != 200:
+        print("  Login HTTP {}: {}".format(status, body[:80]))
         return False
 
     session = body.strip().strip('"')
-    if session == "00000000-0000-0000-0000-000000000000":
-        print("  Login: BAD CREDENTIALS")
+    if session == "00000000-0000-0000-0000-000000000000" or session.startswith('{'):
+        print("  Login rejected:", session[:60])
         return False
 
-    print("  Login OK, session:", session[:8], "...")
+    print("  Login OK (HTTP {}), session: {} ...".format(status, session[:8]))
 
     path = "/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId={}&minutes=1440&maxCount=2".format(session)
-    head, body = post(host, path)
-    print("  Readings body:", repr(body[:100]) if body else "None")
+    status, body = post(host, path)
+    print("  Readings HTTP {}: {}".format(status, repr(body[:100]) if body else "None"))
 
     if not body or body.strip() == "[]":
         print("  => Empty []")
+        if body is not None and body.strip() == "[]":
+            print()
+            print("  ** G7/Share checklist (auth is valid, but no readings returned): **")
+            print("  1. Open Dexcom G7 app -> Settings -> Share -> confirm Share is ON")
+            print("  2. You MUST have at least one follower who has ACCEPTED the invite")
+            print("     via the Dexcom Follow app (just sending the invite is not enough)")
+            print("  3. Sensor must not be in warmup (2-hour warmup returns no data)")
+            print("  4. G7 app must be running & connected in the background")
         return False
 
     # Parse
@@ -116,4 +135,3 @@ for srv in ("share2.dexcom.com", "shareous1.dexcom.com"):
 
 if not found:
     print("\nNeither server returned readings.")
-    print("Check: CGM active, Share enabled, follower accepted invite.")
