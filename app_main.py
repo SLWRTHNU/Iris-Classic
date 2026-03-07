@@ -661,9 +661,29 @@ def _dexcom_post(host, path, json_body=""):
             return None, None
 
         head = raw[:sep].decode("utf-8", "ignore")
-        body_str = raw[sep + 4:].decode("utf-8", "ignore")
+        body_raw = raw[sep + 4:].decode("utf-8", "ignore")
         parts = head.split("\r\n", 1)[0].split(" ")
         status = int(parts[1]) if len(parts) >= 2 else None
+
+        # Decode chunked transfer encoding if used
+        if "transfer-encoding: chunked" in head.lower():
+            body_str = ""
+            pos = 0
+            while pos < len(body_raw):
+                nl = body_raw.find("\r\n", pos)
+                if nl < 0:
+                    break
+                try:
+                    chunk_len = int(body_raw[pos:nl], 16)
+                except Exception:
+                    break
+                if chunk_len == 0:
+                    break
+                body_str += body_raw[nl + 2: nl + 2 + chunk_len]
+                pos = nl + 2 + chunk_len + 2  # skip trailing \r\n
+        else:
+            body_str = body_raw
+
         print("[Dexcom] HTTP", status, "| body[:100]:", body_str[:100])
         return status, body_str
 
