@@ -4,11 +4,17 @@
 import usocket, ssl, utime
 
 # ---- CONFIG ----
-USERNAME = "sennaloop"
-PASSWORD = "YOUR_PASSWORD_HERE"   # fill in
+# CGM wearer's Dexcom account (the G7 user)
+PUBLISHER_USER = "sennaloop"
+PUBLISHER_PASS = "YOUR_PASSWORD_HERE"   # fill in
+
+# Follower's Dexcom account (the person using Dexcom Follow app)
+FOLLOWER_USER  = ""    # fill in - your own Dexcom username/email
+FOLLOWER_PASS  = ""    # fill in - your own Dexcom password
 # ----------------
 
 APP_ID = "d8665ade-9673-4e27-9ff6-92db4ce13d13"
+OUS_HOST = "shareous1.dexcom.com"
 
 def post(host, path, body_str=""):
     body_bytes = body_str.encode() if body_str else b""
@@ -46,7 +52,6 @@ def post(host, path, body_str=""):
     head = raw[:sep].decode("utf-8", "ignore")
     body_raw = raw[sep+4:].decode("utf-8", "ignore")
 
-    # Extract HTTP status code
     status = None
     try:
         status = int(head.split(" ", 2)[1])
@@ -70,43 +75,36 @@ def post(host, path, body_str=""):
     return status, body_raw
 
 
-def try_server(host):
-    print("\n--- Trying:", host, "---")
-    login_body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
-        USERNAME, PASSWORD, APP_ID)
-    status, body = post(host, "/ShareWebServices/Services/General/LoginPublisherAccountByName", login_body)
-    if not body:
-        print("  Login: no response (HTTP {})".format(status))
-        return False
+def login(host, username, password):
+    body = '{{"accountName":"{}","password":"{}","applicationId":"{}"}}'.format(
+        username, password, APP_ID)
+    status, resp = post(host, "/ShareWebServices/Services/General/LoginPublisherAccountByName", body)
+    if status != 200 or not resp:
+        print("  Login HTTP {}: {}".format(status, (resp or "")[:60]))
+        return None
+    sid = resp.strip().strip('"')
+    if not sid or len(sid) < 10 or sid == "00000000-0000-0000-0000-000000000000" or sid.startswith('{'):
+        print("  Login rejected:", sid[:60])
+        return None
+    print("  Login OK, session:", sid[:8], "...")
+    return sid
 
-    if status != 200:
-        print("  Login HTTP {}: {}".format(status, body[:80]))
-        return False
 
-    session = body.strip().strip('"')
-    if session == "00000000-0000-0000-0000-000000000000" or session.startswith('{'):
-        print("  Login rejected:", session[:60])
-        return False
-
-    print("  Login OK (HTTP {}), session: {} ...".format(status, session[:8]))
-
-    path = "/ShareWebServices/Services/Publisher/ReadPublisherLatestGlucoseValues?sessionId={}&minutes=1440&maxCount=2".format(session)
+def read_glucose(host, session, endpoint_type):
+    """endpoint_type: 'Publisher' or 'Follower'"""
+    path = (
+        "/ShareWebServices/Services/{}/ReadPublisherLatestGlucoseValues"
+        "?sessionId={}&minutes=1440&maxCount=2"
+    ).format(endpoint_type, session)
     status, body = post(host, path)
-    print("  Readings HTTP {}: {}".format(status, repr(body[:100]) if body else "None"))
+    print("  {} endpoint HTTP {}: {}".format(
+        endpoint_type, status, repr(body[:80]) if body else "None"))
+    if body and body.strip() not in ("[]", ""):
+        return body
+    return None
 
-    if not body or body.strip() == "[]":
-        print("  => Empty []")
-        if body is not None and body.strip() == "[]":
-            print()
-            print("  ** G7/Share checklist (auth is valid, but no readings returned): **")
-            print("  1. Open Dexcom G7 app -> Settings -> Share -> confirm Share is ON")
-            print("  2. You MUST have at least one follower who has ACCEPTED the invite")
-            print("     via the Dexcom Follow app (just sending the invite is not enough)")
-            print("  3. Sensor must not be in warmup (2-hour warmup returns no data)")
-            print("  4. G7 app must be running & connected in the background")
-        return False
 
-    # Parse
+def parse_and_print(body):
     def find_int(s, key):
         i = s.find(key)
         if i < 0: return None
@@ -116,22 +114,48 @@ def try_server(host):
         if j < len(s) and s[j] == '-': j += 1
         while j < len(s) and s[j].isdigit(): j += 1
         return int(s[i:j]) if j > i else None
-
     mgdl  = find_int(body, '"Value":')
     trend = find_int(body, '"Trend":')
     mmol  = round(mgdl / 18.0, 1) if mgdl else None
     arrows = {1:"↑↑", 2:"↑", 3:"↗", 4:"→", 5:"↘", 6:"↓", 7:"↓↓"}
     print("  => BG: {} mg/dL / {} mmol/L  {}".format(mgdl, mmol, arrows.get(trend, "?")))
-    return True
 
 
 print("=== Dexcom Share server test ===")
-found = False
-for srv in ("share2.dexcom.com", "shareous1.dexcom.com"):
-    if try_server(srv):
-        print("\nWORKING SERVER:", srv)
-        found = True
-        break
+print()
 
-if not found:
-    print("\nNeither server returned readings.")
+# --- Test 1: Publisher login, Publisher endpoint ---
+print("-- Test 1: Publisher login + Publisher endpoint --")
+sid = login(OUS_HOST, PUBLISHER_USER, PUBLISHER_PASS)
+if sid:
+    body = read_glucose(OUS_HOST, sid, "Publisher")
+    if body:
+        print("  SUCCESS via Publisher endpoint!")
+        parse_and_print(body)
+    else:
+        # --- Test 2: Publisher login, Follower endpoint ---
+        print()
+        print("-- Test 2: Publisher login + Follower endpoint --")
+        body = read_glucose(OUS_HOST, sid, "Follower")
+        if body:
+            print("  SUCCESS via Follower endpoint with publisher session!")
+            print("  => Set DEXCOM_MODE = 'follower_endpoint' in config")
+            parse_and_print(body)
+        else:
+            print("  Also empty.")
+
+# --- Test 3: Follower login, Follower endpoint ---
+print()
+print("-- Test 3: Follower login + Follower endpoint --")
+if not FOLLOWER_USER or not FOLLOWER_PASS:
+    print("  Skipped: fill in FOLLOWER_USER / FOLLOWER_PASS above")
+else:
+    fsid = login(OUS_HOST, FOLLOWER_USER, FOLLOWER_PASS)
+    if fsid:
+        body = read_glucose(OUS_HOST, fsid, "Follower")
+        if body:
+            print("  SUCCESS via Follower login + Follower endpoint!")
+            print("  => Use follower credentials in config")
+            parse_and_print(body)
+        else:
+            print("  Also empty. Check that follower has accepted the invite.")
