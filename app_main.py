@@ -1551,8 +1551,7 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
     # Memory monitoring removed - not needed with 8MB RAM
     asyncio.create_task(task_power_monitor())
     asyncio.create_task(task_factory_reset_button(lcd, w_small, st))
-    # task_dimmer disabled until new potentiometer is installed
-    # asyncio.create_task(task_dimmer(lcd))
+    asyncio.create_task(task_dimmer(lcd))
     asyncio.create_task(task_buzzer_stop_button())
     asyncio.create_task(task_buzzer_driver())
     
@@ -1675,7 +1674,7 @@ def main(framebuffer=None):
     wdt = None
 
     # 1. INIT DISPLAY
-    lcd = LCD_Driver(fb=framebuffer, bl=80)  # Fixed 80% brightness (dimmer disabled until new pot installed)
+    lcd = LCD_Driver(fb=framebuffer, bl=80)  # Initial brightness; task_dimmer will take over
     globals()["LCD"] = lcd
     
     # Start with a black screen; data draw will populate it immediately.
