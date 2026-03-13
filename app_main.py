@@ -4,8 +4,7 @@ from machine import Pin
 import utime
 hb_state = True
 wdt = None
-factory_reset_exit_requested = False  # ADD THIS LINE
-focus_mode = False  # Touch toggle: True = show BG + heartbeat only
+factory_reset_exit_requested = False
 
 BUZ = Pin(17, Pin.IN, Pin.PULL_UP)
 utime.sleep_ms(10)
@@ -16,9 +15,6 @@ import network
 import uasyncio as asyncio
 
 gc.collect()
-
-from machine import ADC, Pin
-
 
 # ---------- Config ----------
 import config
@@ -36,7 +32,6 @@ DATA_SOURCE    = cfg("DATA_SOURCE", "nightscout")   # "nightscout" or "dexcom_sh
 DEXCOM_USERNAME = cfg("DEXCOM_USERNAME", "")
 DEXCOM_PASSWORD = cfg("DEXCOM_PASSWORD", "")
 DEXCOM_REGION   = cfg("DEXCOM_REGION", "us")        # "us" or "ous" (outside US)
-TOUCH_ENABLED   = cfg("TOUCH_ENABLED", False)       # True once TP_SDA/SCL/INT/RST are wired
 
 
 LOW_THRESHOLD  = float(cfg("THRESHOLD_LOW", 4.0))
@@ -51,7 +46,7 @@ last = None          # replaces main() local "last"
 
 
 # ---------- Display driver ----------
-from display_3_5 import lcd_st7796 as LCD_Driver
+from display_2inch import lcd_st7789 as LCD_Driver
 
 # ---------- Fonts / Writer ----------
 from writer import CWriter
@@ -60,11 +55,10 @@ import age_small_font as age_font_small
 import arrows_font as font_arrows
 import heart as font_heart
 import delta as font_delta
-import battery_font
 import config_font as font_config
-import big_digits
+import mini_digits as big_digits
 from big_digits_draw import draw_big_text
-BIG_DIGITS_HEIGHT = 140
+BIG_DIGITS_HEIGHT = big_digits.HEIGHT  # 98
 
 
 # Memory monitoring removed - not needed with 8MB RAM
@@ -78,21 +72,6 @@ WHITE  = 0xFFFF
 
 # IMPORTANT: you need sta defined before connect_wifi() uses it
 sta = None
-
-# --- Battery Config ---
-last_usb = None
-power_change_until = 0
-POWER_CHANGE_COOLDOWN_MS = 2500
-
-
-_usb_adc = ADC(Pin(4), atten=ADC.ATTN_11DB)  # Voltage divider: USB 5V → ~1.6V
-
-def is_usb_connected():
-    """Return True if USB 5V rail is present (> ~0.5V threshold)."""
-    return _usb_adc.read_u16() > 10000  # ~0.5V; USB present gives ~32000
-
-
-# Paste this anywhere above async_main() in app_main.py
 
 # Memory monitoring removed - not needed with 8MB RAM
 
@@ -127,8 +106,8 @@ def request_buzzer_stop():
 
 # --- Logo Config ---
 LOGO_FILE = "logo.bin"
-LOGO_W = 480
-LOGO_H = 320
+LOGO_W = 320
+LOGO_H = 240
 
 def show_logo(lcd):
     expected = LOGO_W * LOGO_H * 2  # 307200
@@ -252,66 +231,6 @@ def connect_wifi(ssid, password, max_attempts=2):
 
     return False
 
-pot = ADC(Pin(1))
-pot.atten(ADC.ATTN_11DB)  # Full 0-3.3V range
-
-MIN_BL = 1
-MAX_BL = 100
-
-def _map_u16_to_percent(raw):
-    return MIN_BL + (raw * (MAX_BL - MIN_BL) // 65535)
-
-async def task_dimmer(lcd):
-    # Initial set (no lag on boot) - Don't change brightness immediately
-    raw = pot.read_u16()
-    smoothed = raw
-    current = _map_u16_to_percent(raw)
-    # Don't call lcd.bl_ctrl(current) here - keep bootloader's brightness
-
-    # Tune these:
-    SLOW_ALPHA_NUM = 1
-    SLOW_ALPHA_DEN = 12     # smooth when steady
-    FAST_ALPHA_NUM = 1
-    FAST_ALPHA_DEN = 3      # quick response when knob moves
-
-    SLOW_STEP = 2
-    FAST_STEP = 8
-
-    MOVE_THRESHOLD = 900    # u16 delta that counts as "real movement"
-    DEAD_BAND = 0           # start immediately (no waiting)
-    POLL_MS = 15            # faster polling feels instant
-
-    last_raw = raw
-
-    while True:
-        raw = pot.read_u16()
-        d = abs(raw - last_raw)
-        last_raw = raw
-
-        # If the knob moved, respond faster; otherwise, stay smooth.
-        if d > MOVE_THRESHOLD:
-            a_num, a_den = FAST_ALPHA_NUM, FAST_ALPHA_DEN
-            max_step = FAST_STEP
-        else:
-            a_num, a_den = SLOW_ALPHA_NUM, SLOW_ALPHA_DEN
-            max_step = SLOW_STEP
-
-        # EMA smoothing
-        smoothed = smoothed + (raw - smoothed) * a_num // a_den
-        target = _map_u16_to_percent(smoothed)
-
-        if abs(target - current) <= DEAD_BAND:
-            await asyncio.sleep_ms(POLL_MS)
-            continue
-
-        # rate limit
-        if target > current:
-            current = min(current + max_step, target)
-        else:
-            current = max(current - max_step, target)
-
-        lcd.bl_ctrl(current)
-        await asyncio.sleep_ms(POLL_MS)
 
 
 def now_unix_s():
@@ -878,9 +797,6 @@ class ScreenState:
 
         self.delta_text = None
         self.heart_on = None
-        self.batt_x = None
-        self.batt_pos = None
-
 
         self.last_have_data = False
         self.wifi_lost = False
@@ -1126,12 +1042,12 @@ def draw_loading_once(lcd, writer, st):
     # DON'T clear - logo is already showing
     # Just overlay the message at the bottom
     writer.setcolor(WHITE, BLACK)
-    writer.set_textpos(lcd, 280, 200)  # Bottom of screen
+    writer.set_textpos(lcd, 195, 220)  # Bottom of 320x240 screen
     writer.printstring(":)")
-    
+
     # Only update the small region where we wrote
     if hasattr(lcd, 'show_rect'):
-        lcd.show_rect(180, 270, 120, 40)
+        lcd.show_rect(220, 190, 80, 40)
     else:
         lcd.show()
 
@@ -1139,13 +1055,12 @@ def draw_loading_once(lcd, writer, st):
 
 def draw_all_fields_if_needed(
     lcd,
-    w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
+    w_small, w_age_small, w_arrow, w_heart, w_delta_icon,
     hb_state,
     st
 ):
-    global last, focus_mode
+    global last
 
-    
     if st.factory_mode:
         return
 
@@ -1153,7 +1068,7 @@ def draw_all_fields_if_needed(
         return
 
     W, H = lcd.width, lcd.height
-    
+
     y_age = 6
 
     if not last:
@@ -1170,8 +1085,6 @@ def draw_all_fields_if_needed(
         st.arrow_text = None
         st.delta_text = None
         st.heart_on = None
-        st.batt_x = None
-        st.batt_pos = None
 
     # Calculate layout positions
     heart_right_margin = 10
@@ -1227,12 +1140,6 @@ def draw_all_fields_if_needed(
         arrow_color = RED
 
     delta_text = fmt_delta(last["delta"])
-    
-    # In focus mode, hide age/trend/delta — show only BG and heartbeat
-    if focus_mode:
-        age_text   = ""
-        arrow_text = ""
-        delta_text = ""
 
     _begin_batch()
     _draw_age_if_changed(lcd, w_age_small, age_text, age_color, st, y_age)
@@ -1240,8 +1147,6 @@ def draw_all_fields_if_needed(
     _draw_bg_if_changed(lcd, bg_text, bg_color, st, y_bg)
     _draw_arrow_if_changed(lcd, w_arrow, arrow_text, arrow_color, st, x_arrow, y_arrow, x_offset=10, y_offset=-10)
     _draw_delta_if_changed(lcd, w_small, w_delta_icon, delta_text, st, y_delta, right_margin=4)
-    if not focus_mode:
-        _draw_batt_x_if_changed(lcd, w_batt, st, x=10, y=8)
     _end_batch(lcd)
 
 
@@ -1333,23 +1238,7 @@ async def task_factory_reset_button(lcd, w_small, st):
         machine_reset()
 
 
-async def task_power_monitor():
-    # watches USB status and updates power_change_until
-    global last_usb, power_change_until
-    while True:
-        now = utime.ticks_ms()
-        usb_now = is_usb_connected()
-
-        if last_usb is None:
-            last_usb = usb_now
-        elif usb_now != last_usb:
-            last_usb = usb_now
-            power_change_until = utime.ticks_add(now, POWER_CHANGE_COOLDOWN_MS)
-
-        await asyncio.sleep_ms(100)
-
-
-async def task_heartbeat(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
+async def task_heartbeat(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st):
     global hb_state, last, wdt, factory_reset_exit_requested
     
     while True:
@@ -1370,31 +1259,28 @@ async def task_heartbeat(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_ic
             st.arrow_text = None
             st.delta_text = None
             st.heart_on = None
-            st.batt_x = None
-            st.batt_pos = None
-            
-        
+
         hb_state = not hb_state
         draw_all_fields_if_needed(
-            lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
+            lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon,
             hb_state, st
         )
         await asyncio.sleep(1)
 
 
-async def task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
+async def task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st):
     global last, hb_state
     while True:
         if last:
             draw_all_fields_if_needed(
-                lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
+                lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon,
                 hb_state, st
             )
         await asyncio.sleep(60)
 
 
-async def task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
-    global last, hb_state, wifi_ok, power_change_until, wdt
+async def task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st):
+    global last, hb_state, wifi_ok, wdt
 
     await asyncio.sleep(1 if wifi_ok else 60)
 
@@ -1423,23 +1309,19 @@ async def task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delt
             st.arrow_text = None
             st.delta_text = None
             st.heart_on = None
-            st.batt_x = None
-            st.batt_pos = None
 
-        now = utime.ticks_ms()
-        if utime.ticks_diff(now, power_change_until) >= 0:
-            try:
-                parsed = fetch_and_parse()
-                if parsed:
-                    last = parsed
-                    check_glucose_alerts(last["bg"])
-                    draw_all_fields_if_needed(
-                        lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
-                        hb_state, st
-                    )
-                gc.collect()
-            except Exception as e:
-                pass
+        try:
+            parsed = fetch_and_parse()
+            if parsed:
+                last = parsed
+                check_glucose_alerts(last["bg"])
+                draw_all_fields_if_needed(
+                    lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon,
+                    hb_state, st
+                )
+            gc.collect()
+        except Exception as e:
+            pass
 
         await asyncio.sleep_ms(5000)
 
@@ -1524,45 +1406,19 @@ async def task_wifi_reconnect(st):
             wdt.feed()
 
 
-async def task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
-    global focus_mode, hb_state
-    try:
-        from ft6336 import FT6336
-        touch = FT6336()
-    except Exception as e:
-        print("task_touch: FT6336 init failed:", e)
-        return
-    while True:
-        try:
-            if touch.poll_tap():
-                focus_mode = not focus_mode
-                draw_all_fields_if_needed(
-                    lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
-                    hb_state, st
-                )
-        except Exception as e:
-            print("task_touch: poll error:", e)
-        await asyncio.sleep_ms(50)
-
-
-async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st):
+async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st):
     global wdt
-    
-    # Memory monitoring removed - not needed with 8MB RAM
-    asyncio.create_task(task_power_monitor())
+
     asyncio.create_task(task_factory_reset_button(lcd, w_small, st))
-    asyncio.create_task(task_dimmer(lcd))
     asyncio.create_task(task_buzzer_stop_button())
     asyncio.create_task(task_buzzer_driver())
-    
+
     await asyncio.sleep(2)
-    
-    asyncio.create_task(task_heartbeat(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
-    asyncio.create_task(task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
-    asyncio.create_task(task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
+
+    asyncio.create_task(task_heartbeat(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st))
+    asyncio.create_task(task_age_redraw(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st))
+    asyncio.create_task(task_glucose_fetch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st))
     asyncio.create_task(task_wifi_reconnect(st))
-    if TOUCH_ENABLED:
-        asyncio.create_task(task_touch(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st))
 
     while True:
         if wdt:
@@ -1570,38 +1426,6 @@ async def async_main(lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, 
         await asyncio.sleep(5)  # Feed every 5 seconds
 
 
-
-def _draw_batt_x_if_changed(lcd, w_batt, st, x=10, y=8):
-    new_text = ""  # Battery icon disabled until hardware is installed
-    new_pos = (x, y)
-
-    # Only skip if BOTH the icon AND the position are unchanged
-    if st.batt_x == new_text and st.batt_pos == new_pos:
-        return
-
-    pad = 0
-    w = w_batt.stringlen("0") + pad * 2
-    h = w_batt.font.height() + pad * 2
-
-    # Clear the old position if needed
-    if st.batt_pos is not None:
-        ox, oy = st.batt_pos
-        ow = w_batt.stringlen("0") + pad * 2
-        oh = w_batt.font.height() + pad * 2
-        lcd.fill_rect(ox, oy, ow, oh, BLACK)
-        _show_rect(lcd, ox, oy, ow, oh)
-
-    # Draw new (or blank)
-    lcd.fill_rect(x, y, w, h, BLACK)
-    if new_text:
-        w_batt.setcolor(GREEN, BLACK)
-        w_batt.set_textpos(lcd, y + pad, x + pad)
-        w_batt.printstring(new_text)
-
-    _show_rect(lcd, x, y, w, h)
-
-    st.batt_x = new_text
-    st.batt_pos = new_pos
 
 # --- Buzzer Configuration ---
 # Read alert settings from config.py
@@ -1694,13 +1518,12 @@ def main(framebuffer=None):
     w_arrow = CWriter(lcd, font_arrows, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
     w_heart = CWriter(lcd, font_heart, fgcolor=RED, bgcolor=BLACK, verbose=False)
     w_delta_icon = CWriter(lcd, font_delta, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
-    w_batt = CWriter(lcd, battery_font, fgcolor=WHITE, bgcolor=BLACK, verbose=False)
     gc.collect()
 
     w_small.set_spacing(3)
     w_age_small.set_spacing(2)
     w_arrow.set_spacing(8)
-    
+
     st = ScreenState()
 
     # 4. WIFI
@@ -1723,22 +1546,22 @@ def main(framebuffer=None):
     # 6. If we have data, draw it NOW
     if last:
         draw_all_fields_if_needed(
-            lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt,
+            lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon,
             hb_state, st
         )
         gc.collect()
 
     # 7. START ASYNC LOOP
     asyncio.run(async_main(
-        lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, w_batt, st
+        lcd, w_small, w_age_small, w_arrow, w_heart, w_delta_icon, st
     ))
 
 
 if __name__ == "__main__":
     try:
-        # ESP32-S3 has 8MB PSRAM - allocate full framebuffer!
-        fb = bytearray(480 * 320 * 2)  # 307KB framebuffer
-        print(f"Framebuffer allocated: {len(fb)} bytes")
+        # ESP32-S3 has 8MB PSRAM — landscape 320×240 framebuffer
+        fb = bytearray(320 * 240 * 2)  # 153KB framebuffer
+        print("Framebuffer allocated: %d bytes" % len(fb))
         main(framebuffer=fb)
     except Exception as e:
         print("CRITICAL CRASH:", e)

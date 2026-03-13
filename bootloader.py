@@ -64,10 +64,10 @@ BLACK  = 0x0000
 WHITE  = 0xFFFF
 
 LOGO_FILE  = "logo.bin"
-LOGO_W     = 480
-LOGO_H     = 320
+LOGO_W     = 320
+LOGO_H     = 240
 BAR_HEIGHT = 12
-Y_POS      = 307  # 320 - 13 (bottom of screen)
+Y_POS      = 227  # 240 - 13 (bottom of screen)
 STATUS_X   = 3
 
 # ---------- LCD hard reset/backlight ----------
@@ -102,26 +102,18 @@ def init_lcd():
     if _LCD_INSTANCE is not None:
         return _LCD_INSTANCE
     try:
-        from display_3_5 import lcd_st7796 as LCD_Driver
-        from machine import ADC, Pin
+        from display_2inch import lcd_st7789 as LCD_Driver
         import utime
-        
+
         # Give the power rail a moment to settle
-        utime.sleep_ms(100) 
-        
-        # Read potentiometer and set backlight to user's preference
-        # ESP32-S3: Use GPIO 1 (ADC) instead of GPIO 26
-        pot = ADC(Pin(1))
-        raw = pot.read_u16()
-        # Map potentiometer value to 1-100% (same formula as app_main)
-        MIN_BL = 1
-        MAX_BL = 100
-        brightness = MIN_BL + (raw * (MAX_BL - MIN_BL) // 65535)
-        _lcd_backlight_set(brightness)
         utime.sleep_ms(100)
-        
-        # Initialize the driver (but it won't call lcd_init yet)
-        lcd = LCD_Driver(fb=bytearray(480 * 320 * 2))
+
+        # Fixed brightness during boot (no potentiometer on Mini)
+        _lcd_backlight_set(80)
+        utime.sleep_ms(100)
+
+        # Initialize the driver with landscape 320×240 framebuffer
+        lcd = LCD_Driver(fb=bytearray(320 * 240 * 2))
         
         # Buffer is already zeroed (black); draw_boot_screen() will show it.
         
@@ -212,31 +204,9 @@ def draw_boot_screen(lcd):
     try:
         size = os.stat(LOGO_FILE)[6]
         if size == LOGO_W * LOGO_H * 2:
-            # Exact match — load directly into framebuffer
+            # Exact match (320×240) — load directly into framebuffer
             with open(LOGO_FILE, "rb") as f:
                 f.readinto(lcd.buffer)
-            logo_ok = True
-        elif size == 320 * 240 * 2:
-            # 320×240 logo — scale up to fill 480×320 (nearest-neighbour)
-            src_w, src_h = 320, 240
-            dst_w, dst_h = LOGO_W, LOGO_H
-            # Pre-compute source byte offset for each destination column (once)
-            col_src = [dx * src_w // dst_w * 2 for dx in range(dst_w)]
-            src_row_buf = bytearray(src_w * 2)
-            dst_row_buf = bytearray(dst_w * 2)
-            last_sy = -1
-            with open(LOGO_FILE, "rb") as f:
-                for dy in range(dst_h):
-                    sy = dy * src_h // dst_h
-                    if sy != last_sy:
-                        f.readinto(src_row_buf)
-                        last_sy = sy
-                    for dx in range(dst_w):
-                        s = col_src[dx]
-                        dst_row_buf[dx * 2]     = src_row_buf[s]
-                        dst_row_buf[dx * 2 + 1] = src_row_buf[s + 1]
-                    dst = dy * dst_w * 2
-                    lcd.buffer[dst:dst + dst_w * 2] = dst_row_buf
             logo_ok = True
     except:
         pass
